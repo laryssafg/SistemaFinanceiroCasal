@@ -1,0 +1,6 @@
+{
+  "name": "Sistema Financeiro do Casal",
+  "description": "Planejamento financeiro integrado para casais com contas separadas, despesas compartilhadas, divisão proporcional e controle patrimonial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
