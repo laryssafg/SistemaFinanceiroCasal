@@ -598,3 +598,214 @@ export const creditCardService = {
     }
   },
 };
+
+// =============================================================================
+// benefitService — Benefícios VR/VA integrados ao Supabase
+// =============================================================================
+
+export interface BenefitCardDB {
+  benefit_card_id: string;
+  household_id: string;
+  member_id: string;
+  benefit_type: 'VR' | 'VA';
+  provider_name: string;
+  monthly_credit: number;   // centavos
+  is_active: boolean;
+  total_credits: number;    // centavos
+  total_purchases: number;  // centavos
+  current_balance: number;  // centavos
+}
+
+export interface BenefitMovementDB {
+  id: string;
+  household_id: string;
+  benefit_card_id: string;
+  movement_type: 'credit' | 'purchase';
+  amount: number;           // centavos
+  description: string;
+  category: string | null;
+  movement_date: string;    // DATE string
+  competence_month: string; // YYYY-MM
+  created_by: string | null;
+  created_at: string;
+  reversed_by: string | null;
+  is_reversal: boolean;
+  original_movement_id: string | null;
+  notes: string | null;
+}
+
+export const benefitService = {
+  /**
+   * Lista todos os cartões do núcleo com saldo derivado (via view v_benefit_card_balances)
+   */
+  async listCards(): Promise<BenefitCardDB[]> {
+    const { data, error } = await supabase
+      .from('v_benefit_card_balances')
+      .select('*')
+      .eq('is_active', true)
+      .order('benefit_card_id');
+
+    if (error) {
+      console.error('Erro ao listar cartões de benefício:', error.message);
+      throw new Error(`Falha ao listar benefícios: ${error.message}`);
+    }
+    return (data ?? []) as BenefitCardDB[];
+  },
+
+  /**
+   * Cria cartão de benefício com saldo inicial (RPC atômica)
+   */
+  async createCard(params: {
+    memberId: string;
+    benefitType: 'VR' | 'VA';
+    providerName: string;
+    monthlyCredit: number; // reais
+    initialBalance: number; // reais
+  }): Promise<string> {
+    const { data, error } = await supabase.rpc('register_benefit_card', {
+      p_member_id: params.memberId,
+      p_benefit_type: params.benefitType,
+      p_provider_name: params.providerName,
+      p_monthly_credit: toCents(params.monthlyCredit),
+      p_initial_balance: toCents(params.initialBalance),
+    });
+
+    if (error) {
+      console.error('Erro ao criar cartão de benefício:', error.message);
+      throw new Error(error.message);
+    }
+    return data as string;
+  },
+
+  /**
+   * Desativa (soft delete) um cartão de benefício
+   */
+  async deactivateCard(cardId: string): Promise<void> {
+    const { error } = await supabase
+      .from('benefit_cards')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', cardId);
+
+    if (error) {
+      console.error('Erro ao desativar cartão de benefício:', error.message);
+      throw new Error(`Falha ao desativar cartão: ${error.message}`);
+    }
+  },
+
+  /**
+   * Registra crédito (recarga) em cartão de benefício (RPC atômica)
+   */
+  async registerCredit(params: {
+    benefitCardId: string;
+    amount: number;      // reais
+    description?: string;
+    movementDate?: string; // YYYY-MM-DD
+    competenceMonth?: string; // YYYY-MM
+  }): Promise<string> {
+    const today = new Date().toISOString().split('T')[0];
+    const monthStr = today.substring(0, 7);
+
+    const { data, error } = await supabase.rpc('register_benefit_credit', {
+      p_benefit_card_id: params.benefitCardId,
+      p_amount_cents: toCents(params.amount),
+      p_description: params.description ?? 'Crédito recebido',
+      p_movement_date: params.movementDate ?? today,
+      p_competence_month: params.competenceMonth ?? monthStr,
+    });
+
+    if (error) {
+      console.error('Erro ao registrar crédito de benefício:', error.message);
+      throw new Error(error.message);
+    }
+    return data as string;
+  },
+
+  /**
+   * Registra consumo em VR/VA com validação de saldo no banco (RPC atômica)
+   * Nunca afeta contas bancárias.
+   */
+  async registerPurchase(params: {
+    benefitCardId: string;
+    amount: number;      // reais
+    description: string;
+    category?: string;
+    movementDate?: string; // YYYY-MM-DD
+    competenceMonth?: string; // YYYY-MM
+    notes?: string;
+  }): Promise<string> {
+    const today = new Date().toISOString().split('T')[0];
+    const monthStr = today.substring(0, 7);
+
+    const { data, error } = await supabase.rpc('register_benefit_purchase', {
+      p_benefit_card_id: params.benefitCardId,
+      p_amount_cents: toCents(params.amount),
+      p_description: params.description,
+      p_category: params.category ?? 'Alimentação e Mercado',
+      p_movement_date: params.movementDate ?? today,
+      p_competence_month: params.competenceMonth ?? monthStr,
+      p_notes: params.notes,
+    });
+
+    if (error) {
+      console.error('Erro ao registrar compra em benefício:', error.message);
+      // Repassa a mensagem do banco (inclui "Saldo insuficiente...")
+      throw new Error(error.message);
+    }
+    return data as string;
+  },
+
+  /**
+   * Estorna um movimento (compra ou crédito) com rastreabilidade. Bloqueia duplicidade.
+   */
+  async reverseMovement(params: {
+    movementId: string;
+    reason?: string;
+  }): Promise<string> {
+    const { data, error } = await supabase.rpc('reverse_benefit_movement', {
+      p_movement_id: params.movementId,
+      p_reason: params.reason ?? 'Estorno solicitado pela usuária',
+    });
+
+    if (error) {
+      console.error('Erro ao estornar movimento de benefício:', error.message);
+      throw new Error(error.message);
+    }
+    return data as string;
+  },
+
+  /**
+   * Lista movimentações de um cartão (ativas e estornos), excluindo as estornadas
+   */
+  async listMovements(benefitCardId: string): Promise<BenefitMovementDB[]> {
+    const { data, error } = await supabase
+      .from('benefit_movements')
+      .select('*')
+      .eq('benefit_card_id', benefitCardId)
+      .is('reversed_by', null)      // excluir lançamentos que foram estornados
+      .order('movement_date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao listar movimentações de benefício:', error.message);
+      throw new Error(`Falha ao listar movimentações: ${error.message}`);
+    }
+    return (data ?? []) as BenefitMovementDB[];
+  },
+
+  /**
+   * Lista todas as movimentações do núcleo (para histórico geral incluindo estornadas)
+   */
+  async listAllMovements(): Promise<BenefitMovementDB[]> {
+    const { data, error } = await supabase
+      .from('benefit_movements')
+      .select('*')
+      .order('movement_date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao listar todas as movimentações de benefício:', error.message);
+      throw new Error(`Falha ao listar histórico: ${error.message}`);
+    }
+    return (data ?? []) as BenefitMovementDB[];
+  },
+};

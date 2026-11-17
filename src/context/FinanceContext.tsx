@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { accountService, transactionService, creditCardService } from '../services/financeDataService';
+import { accountService, transactionService, creditCardService, benefitService, fromCents, toCents } from '../services/financeDataService';
 import {
   INITIAL_ALERTS,
   INITIAL_AUDIT_LOGS,
@@ -26,6 +26,7 @@ import {
   AuditLogEntry,
   BankAccount,
   BenefitCard,
+  BenefitMovement,
   BudgetCategory,
   CoupleSettlement,
   CreditCard,
@@ -142,14 +143,21 @@ interface FinanceContextValue {
   transactions: Transaction[];
   addTransaction: (tx: Omit<Transaction, 'id'>) => void;
   benefits: BenefitCard[];
-  addBenefitCard: (benefit: Omit<BenefitCard, 'id' | 'lastCreditDate'>) => void;
+  benefitMovements: BenefitMovement[];
+  addBenefitCard: (benefit: Omit<BenefitCard, 'id' | 'lastCreditDate'>) => Promise<void>;
+  registerBenefitCredit: (params: {
+    benefitId: string;
+    amount: number;
+    description?: string;
+  }) => Promise<void>;
   registerBenefitPurchase: (params: {
     benefitId: string;
     description: string;
     category: string;
     amount: number;
     scope: 'individual' | 'shared';
-  }) => void;
+  }) => Promise<void>;
+  reverseBenefitMovement: (movementId: string, reason?: string) => Promise<void>;
   cards: CreditCard[];
   addCreditCard: (card: Omit<CreditCard, 'id'>) => Promise<void>;
   updateCreditCard: (cardId: string, updates: Partial<CreditCard>) => Promise<void>;
@@ -333,21 +341,60 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       setTransactions(INITIAL_TRANSACTIONS);
       setCards(INITIAL_CREDIT_CARDS);
       setInstallments(INITIAL_CREDIT_CARD_INSTALLMENTS);
+      setBenefits(INITIAL_BENEFIT_CARDS);
+      setBenefitMovements([]);
       return;
     }
 
     try {
       setIsDataLoading(true);
-      const [dbAccounts, dbTransactions, dbCards, dbInstallments] = await Promise.all([
+      const [dbAccounts, dbTransactions, dbCards, dbInstallments, dbBenefitCards, dbBenefitMovements] = await Promise.all([
         accountService.listAccounts(householdMembersMap),
         transactionService.listTransactions(householdMembersMap),
         creditCardService.listCards(householdMembersMap),
         creditCardService.listInstallments(householdMembersMap),
+        benefitService.listCards(),
+        benefitService.listAllMovements(),
       ]);
       setAccounts(dbAccounts);
       setTransactions(dbTransactions);
       setCards(dbCards);
       setInstallments(dbInstallments);
+
+      // Mapeia os BenefitCardDB para BenefitCard
+      const mappedBenefits: BenefitCard[] = dbBenefitCards.map((b) => {
+        const memberInfo = householdMembersMap[b.member_id];
+        return {
+          id: b.benefit_card_id,
+          type: b.benefit_type,
+          providerName: b.provider_name,
+          partnerId: memberInfo ? memberInfo.partnerId : 'partner_a',
+          memberId: b.member_id,
+          monthlyCredit: fromCents(b.monthly_credit),
+          currentBalance: fromCents(b.current_balance),
+          spentThisMonth: fromCents(b.total_purchases),
+          lastCreditDate: new Date().toISOString().split('T')[0],
+        };
+      });
+      setBenefits(mappedBenefits);
+
+      const mappedMovements: BenefitMovement[] = dbBenefitMovements.map((m) => ({
+        id: m.id,
+        benefitCardId: m.benefit_card_id,
+        movementType: m.movement_type,
+        amount: fromCents(m.amount),
+        description: m.description,
+        category: m.category,
+        movementDate: m.movement_date,
+        competenceMonth: m.competence_month,
+        createdBy: m.created_by,
+        createdAt: m.created_at,
+        reversedBy: m.reversed_by,
+        isReversal: m.is_reversal,
+        originalMovementId: m.original_movement_id,
+        notes: m.notes,
+      }));
+      setBenefitMovements(mappedMovements);
     } catch (err: any) {
       console.error('Falha ao carregar dados do Supabase:', err);
       showToast('Erro ao sincronizar dados com o banco.');
@@ -361,6 +408,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     refreshFinancialData();
   }, [refreshFinancialData]);
   const [benefits, setBenefits] = useState<BenefitCard[]>(INITIAL_BENEFIT_CARDS);
+  const [benefitMovements, setBenefitMovements] = useState<BenefitMovement[]>([]);
   const [cards, setCards] = useState<CreditCard[]>(INITIAL_CREDIT_CARDS);
   const [installments, setInstallments] = useState<CreditCardInstallment[]>(
     INITIAL_CREDIT_CARD_INSTALLMENTS,
@@ -834,7 +882,36 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  const addBenefitCard = (benefit: Omit<BenefitCard, 'id' | 'lastCreditDate'>) => {
+  const addBenefitCard = async (benefit: Omit<BenefitCard, 'id' | 'lastCreditDate'>) => {
+    if (isLiveDatabase && household?.id && memberProfile?.id) {
+      try {
+        setIsDataLoading(true);
+        const ownerMemberId =
+          benefit.partnerId === memberProfile.partner_role
+            ? memberProfile.id
+            : partnerProfile?.id ?? memberProfile.id;
+
+        await benefitService.createCard({
+          memberId: ownerMemberId,
+          benefitType: benefit.type,
+          providerName: benefit.providerName,
+          monthlyCredit: benefit.monthlyCredit,
+          initialBalance: benefit.currentBalance,
+        });
+
+        await refreshFinancialData();
+        showToast(`Cartão ${benefit.type} cadastrado com sucesso.`);
+      } catch (err: any) {
+        console.error('Erro ao cadastrar cartão de benefício:', err);
+        showToast(err.message || 'Falha ao cadastrar cartão de benefício.');
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
+    // Modo demonstração
     const newCard: BenefitCard = {
       ...benefit,
       id: `ben_${Date.now()}`,
@@ -851,13 +928,75 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     showToast('Benefício VR/VA cadastrado na prévia.');
   };
 
-  const registerBenefitPurchase = (params: {
+  const registerBenefitCredit = async (params: {
+    benefitId: string;
+    amount: number;
+    description?: string;
+  }) => {
+    if (isLiveDatabase && household?.id) {
+      try {
+        setIsDataLoading(true);
+        await benefitService.registerCredit({
+          benefitCardId: params.benefitId,
+          amount: params.amount,
+          description: params.description || 'Crédito recebido',
+        });
+        await refreshFinancialData();
+        showToast('Crédito em benefício registrado com sucesso.');
+      } catch (err: any) {
+        console.error('Erro ao registrar crédito em benefício:', err);
+        showToast(err.message || 'Falha ao registrar crédito.');
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
+    // Modo demonstração
+    setBenefits((prev) =>
+      prev.map((b) =>
+        b.id === params.benefitId
+          ? {
+              ...b,
+              currentBalance: b.currentBalance + params.amount,
+              monthlyCredit: b.monthlyCredit + params.amount,
+            }
+          : b,
+      ),
+    );
+    showToast('Crédito registrado na prévia.');
+  };
+
+  const registerBenefitPurchase = async (params: {
     benefitId: string;
     description: string;
     category: string;
     amount: number;
     scope: 'individual' | 'shared';
   }) => {
+    if (isLiveDatabase && household?.id) {
+      try {
+        setIsDataLoading(true);
+        await benefitService.registerPurchase({
+          benefitCardId: params.benefitId,
+          amount: params.amount,
+          description: params.description,
+          category: params.category,
+        });
+        await refreshFinancialData();
+        showToast('Compra no benefício registrada com sucesso.');
+      } catch (err: any) {
+        console.error('Erro ao registrar compra em benefício:', err);
+        showToast(err.message || 'Falha ao registrar compra em benefício.');
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
+    // Modo demonstração
     const card = benefits.find((b) => b.id === params.benefitId);
     if (!card) return;
 
@@ -899,6 +1038,30 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       ipOrOrigin: 'Prévia Web',
     });
     showToast(`Compra registrada no ${card.type} sem afetar contas bancárias.`);
+  };
+
+  const reverseBenefitMovement = async (movementId: string, reason?: string) => {
+    if (isLiveDatabase && household?.id) {
+      try {
+        setIsDataLoading(true);
+        await benefitService.reverseMovement({
+          movementId,
+          reason,
+        });
+        await refreshFinancialData();
+        showToast('Estorno realizado com sucesso.');
+      } catch (err: any) {
+        console.error('Erro ao estornar movimento de benefício:', err);
+        showToast(err.message || 'Falha ao estornar movimento.');
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
+    // Modo demonstração
+    showToast('Estorno não suportado na prévia.');
   };
 
   const addCreditCard = async (card: Omit<CreditCard, 'id'>) => {
@@ -1263,8 +1426,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     transactions,
     addTransaction,
     benefits,
+    benefitMovements,
     addBenefitCard,
+    registerBenefitCredit,
     registerBenefitPurchase,
+    reverseBenefitMovement,
     cards,
     addCreditCard,
     updateCreditCard,

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, ShieldAlert, Utensils } from 'lucide-react';
+import { Plus, ShieldAlert, Utensils, ArrowUpRight, RotateCcw } from 'lucide-react';
 import { HorizontalDistributionBar } from '../components/charts/FinanceCharts';
 import { EmptyState } from '../components/ui/FeedbackStates';
 import { Modal } from '../components/ui/Modal';
@@ -17,27 +17,36 @@ import { formatBRL, formatDateBR, formatDateTimeBR, formatPercent } from '../uti
 export function BeneficiosPage() {
   const {
     benefits,
+    benefitMovements,
     addBenefitCard,
+    registerBenefitCredit,
+    registerBenefitPurchase,
+    reverseBenefitMovement,
     transactions,
     partners,
-    registerBenefitPurchase,
     summary,
+    isDataLoading,
   } = useFinance();
 
   const [partnerFilter, setPartnerFilter] = useState<'all' | PartnerId>('all');
   const [isPurchaseOpen, setIsPurchaseOpen] = useState(false);
   const [isAddBenefitOpen, setIsAddBenefitOpen] = useState(false);
+  const [isCreditOpen, setIsCreditOpen] = useState(false);
 
   const [newBenType, setNewBenType] = useState<'VR' | 'VA'>('VR');
   const [newBenProvider, setNewBenProvider] = useState('');
   const [newBenPartner, setNewBenPartner] = useState<PartnerId>('partner_a');
   const [newBenCredit, setNewBenCredit] = useState('');
 
-  const [selectedBenefitId, setSelectedBenefitId] = useState(benefits[0]?.id ?? '');
+  const [selectedBenefitId, setSelectedBenefitId] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Alimentação e Mercado');
   const [amount, setAmount] = useState('');
   const [scope, setScope] = useState<'individual' | 'shared'>('shared');
+
+  const [creditCardId, setCreditCardId] = useState('');
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditDescription, setCreditDescription] = useState('Recarga mensal');
 
   const visibleBenefits = useMemo(
     () =>
@@ -47,15 +56,51 @@ export function BeneficiosPage() {
     [benefits, partnerFilter],
   );
 
-  const benefitTransactions = useMemo(
-    () =>
-      transactions.filter(
+  // No modo autenticado, temos benefitMovements; no modo preview, temos transactions de VR/VA
+  const displayedMovements = useMemo(() => {
+    if (benefitMovements && benefitMovements.length > 0) {
+      return benefitMovements
+        .filter((m) => {
+          if (partnerFilter === 'all') return true;
+          const card = benefits.find((b) => b.id === m.benefitCardId);
+          return card ? card.partnerId === partnerFilter : true;
+        })
+        .map((m) => {
+          const card = benefits.find((b) => b.id === m.benefitCardId);
+          return {
+            id: m.id,
+            description: m.description,
+            category: m.category || 'Alimentação e Mercado',
+            date: m.movementDate,
+            amount: m.amount,
+            movementType: m.movementType,
+            isReversal: m.isReversal,
+            partnerId: card ? card.partnerId : 'partner_a',
+            benefitName: card ? card.providerName : 'Benefício',
+            canReverse: m.movementType === 'purchase' && !m.isReversal && !m.reversedBy,
+          };
+        });
+    }
+
+    return transactions
+      .filter(
         (t) =>
           (t.paymentMethod === 'vr' || t.paymentMethod === 'va') &&
           (partnerFilter === 'all' || t.partnerId === partnerFilter),
-      ),
-    [transactions, partnerFilter],
-  );
+      )
+      .map((t) => ({
+        id: t.id,
+        description: t.description,
+        category: t.category,
+        date: t.date,
+        amount: t.amount,
+        movementType: 'purchase' as const,
+        isReversal: false,
+        partnerId: t.partnerId,
+        benefitName: t.paymentMethod.toUpperCase(),
+        canReverse: false,
+      }));
+  }, [benefitMovements, transactions, partnerFilter, benefits]);
 
   const totalCredits = visibleBenefits.reduce((s, b) => s + b.monthlyCredit, 0);
   const totalSpent = visibleBenefits.reduce((s, b) => s + b.spentThisMonth, 0);
@@ -63,8 +108,10 @@ export function BeneficiosPage() {
 
   const categorySegments = useMemo(() => {
     const byCat: Record<string, number> = {};
-    for (const tx of benefitTransactions) {
-      byCat[tx.category] = (byCat[tx.category] ?? 0) + tx.amount;
+    for (const mov of displayedMovements) {
+      if (mov.movementType === 'purchase') {
+        byCat[mov.category] = (byCat[mov.category] ?? 0) + mov.amount;
+      }
     }
     const palette = [
       'bg-navy-800 dark:bg-navy-400',
@@ -77,42 +124,78 @@ export function BeneficiosPage() {
       value,
       colorClass: palette[i % palette.length],
     }));
-  }, [benefitTransactions]);
+  }, [displayedMovements]);
 
-  const handleAddBenefit = (e: React.FormEvent) => {
+  const handleAddBenefit = async (e: React.FormEvent) => {
     e.preventDefault();
     const credit = Number(newBenCredit.replace(',', '.')) || 0;
     if (!newBenProvider.trim()) return;
-    addBenefitCard({
-      type: newBenType,
-      providerName: newBenProvider.trim(),
-      partnerId: newBenPartner,
-      monthlyCredit: credit,
-      currentBalance: credit,
-      spentThisMonth: 0,
-    });
-    setNewBenProvider('');
-    setNewBenCredit('');
-    setIsAddBenefitOpen(false);
+    try {
+      await addBenefitCard({
+        type: newBenType,
+        providerName: newBenProvider.trim(),
+        partnerId: newBenPartner,
+        monthlyCredit: credit,
+        currentBalance: credit,
+        spentThisMonth: 0,
+      });
+      setNewBenProvider('');
+      setNewBenCredit('');
+      setIsAddBenefitOpen(false);
+    } catch {
+      // toast de erro exibido no contexto
+    }
   };
 
-  const handlePurchaseSubmit = (e: React.FormEvent) => {
+  const handlePurchaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetId = selectedBenefitId || benefits[0]?.id;
     const num = Number(amount.replace(',', '.'));
     if (!targetId || !description.trim() || isNaN(num) || num <= 0) return;
 
-    registerBenefitPurchase({
-      benefitId: targetId,
-      description: description.trim(),
-      category,
-      amount: num,
-      scope,
-    });
+    try {
+      await registerBenefitPurchase({
+        benefitId: targetId,
+        description: description.trim(),
+        category,
+        amount: num,
+        scope,
+      });
+      setDescription('');
+      setAmount('');
+      setIsPurchaseOpen(false);
+    } catch {
+      // toast de erro exibido no contexto
+    }
+  };
 
-    setDescription('');
-    setAmount('');
-    setIsPurchaseOpen(false);
+  const handleCreditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = creditCardId || benefits[0]?.id;
+    const num = Number(creditAmount.replace(',', '.'));
+    if (!targetId || isNaN(num) || num <= 0) return;
+
+    try {
+      await registerBenefitCredit({
+        benefitId: targetId,
+        amount: num,
+        description: creditDescription.trim() || 'Recarga recebida',
+      });
+      setCreditAmount('');
+      setCreditDescription('Recarga mensal');
+      setIsCreditOpen(false);
+    } catch {
+      // toast exibido no contexto
+    }
+  };
+
+  const handleReverseMovement = async (movementId: string) => {
+    if (!window.confirm('Confirma o estorno deste lançamento? O valor será reajustado no saldo.')) return;
+    try {
+      await reverseBenefitMovement(movementId);
+    } catch {
+      // toast exibido no contexto
+    }
   };
 
   return (
@@ -139,6 +222,18 @@ export function BeneficiosPage() {
             >
               <Plus className="w-3.5 h-3.5" />
               Cadastrar Benefício
+            </button>
+            <button
+              type="button"
+              disabled={benefits.length === 0}
+              onClick={() => {
+                setCreditCardId(benefits[0]?.id ?? '');
+                setIsCreditOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-emerald-950 dark:text-emerald-100 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 disabled:opacity-40 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              Registrar Crédito (Recarga)
             </button>
             <button
               type="button"
@@ -263,29 +358,53 @@ export function BeneficiosPage() {
                 Histórico de Movimentações em VR/VA
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                Compras registradas exclusivamente em benefícios
+                Créditos, consumos e estornos registrados exclusivamente em benefícios
               </p>
-              {benefitTransactions.length === 0 ? (
+              {displayedMovements.length === 0 ? (
                 <p className="text-xs text-slate-500 py-6 text-center">
-                  Nenhuma compra registrada nos benefícios até o momento.
+                  Nenhuma movimentação registrada nos benefícios até o momento.
                 </p>
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                  {benefitTransactions.map((tx) => (
-                    <div key={tx.id} className="py-3 flex items-center justify-between gap-4">
+                  {displayedMovements.map((mov) => (
+                    <div key={mov.id} className="py-3 flex items-center justify-between gap-4">
                       <div>
-                        <p className="font-medium text-slate-900 dark:text-slate-100">
-                          {tx.description}
+                        <p className="font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          {mov.description}
+                          {mov.isReversal && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-medium">
+                              Estorno
+                            </span>
+                          )}
                         </p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {formatDateTimeBR(tx.date)} · {tx.category} ·{' '}
-                          {getPartnerName(partners, tx.partnerId)} ·{' '}
-                          {tx.paymentMethod.toUpperCase()}
+                          {formatDateBR(mov.date)} · {mov.category} ·{' '}
+                          {getPartnerName(partners, mov.partnerId)} · {mov.benefitName}
                         </p>
                       </div>
-                      <span className="font-mono tabular-nums font-semibold text-red-700 dark:text-red-400 shrink-0">
-                        -{formatBRL(tx.amount)}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`font-mono tabular-nums font-semibold shrink-0 ${
+                            mov.movementType === 'credit'
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-red-700 dark:text-red-400'
+                          }`}
+                        >
+                          {mov.movementType === 'credit' ? '+' : '-'}
+                          {formatBRL(mov.amount)}
+                        </span>
+                        {mov.canReverse && (
+                          <button
+                            type="button"
+                            title="Estornar lançamento"
+                            disabled={isDataLoading}
+                            onClick={() => handleReverseMovement(mov.id)}
+                            className="p-1 rounded text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -369,7 +488,8 @@ export function BeneficiosPage() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 disabled:opacity-50 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
             >
               Salvar Benefício
             </button>
@@ -390,7 +510,7 @@ export function BeneficiosPage() {
               Cartão de Benefício
             </label>
             <select
-              value={selectedBenefitId}
+              value={selectedBenefitId || benefits[0]?.id || ''}
               onChange={(e) => setSelectedBenefitId(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
             >
@@ -469,9 +589,82 @@ export function BeneficiosPage() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 disabled:opacity-50 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
             >
               Registrar no Benefício
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Registrar Crédito (Recarga) */}
+      <Modal
+        open={isCreditOpen}
+        onClose={() => setIsCreditOpen(false)}
+        title="Registrar Crédito no Benefício (VR / VA)"
+        subtitle="Adiciona saldo ao cartão corporativo sem registrar entrada em contas bancárias"
+      >
+        <form onSubmit={handleCreditSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Cartão de Benefício
+            </label>
+            <select
+              value={creditCardId || benefits[0]?.id || ''}
+              onChange={(e) => setCreditCardId(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+            >
+              {benefits.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.providerName} ({getPartnerShortName(partners, b.partnerId)}) — Saldo atual:{' '}
+                  {formatBRL(b.currentBalance)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Descrição / Origem do Crédito
+            </label>
+            <input
+              required
+              type="text"
+              value={creditDescription}
+              onChange={(e) => setCreditDescription(e.target.value)}
+              placeholder="Ex.: Recarga mensal da empresa..."
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Valor do Crédito (R$)
+            </label>
+            <input
+              required
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={creditAmount}
+              onChange={(e) => setCreditAmount(e.target.value)}
+              placeholder="0,00"
+              className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsCreditOpen(false)}
+              className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg"
+            >
+              Confirmar Recarga
             </button>
           </div>
         </form>

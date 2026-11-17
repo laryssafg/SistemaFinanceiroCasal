@@ -117,10 +117,29 @@ export interface BenefitCard {
   type: 'VR' | 'VA';
   providerName: string;
   partnerId: PartnerId;
+  /** UUID do membro no banco (member_id) — preenchido no modo autenticado */
+  memberId?: string;
   monthlyCredit: number;
   currentBalance: number;
   spentThisMonth: number;
   lastCreditDate: string;
+}
+
+export interface BenefitMovement {
+  id: string;
+  benefitCardId: string;
+  movementType: 'credit' | 'purchase';
+  amount: number;           // reais
+  description: string;
+  category: string | null;
+  movementDate: string;     // YYYY-MM-DD
+  competenceMonth: string;  // YYYY-MM
+  createdBy: string | null;
+  createdAt: string;
+  reversedBy: string | null;
+  isReversal: boolean;
+  originalMovementId: string | null;
+  notes: string | null;
 }
 
 export interface BudgetCategory {
