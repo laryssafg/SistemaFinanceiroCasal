@@ -80,3 +80,43 @@ CREATE TABLE fiscal_snapshots (
 COMMENT ON TABLE fiscal_snapshots IS 'Snapshots financeiros de fechamento. Preservados após reaberturas.';
 
 CREATE INDEX idx_fs_period ON fiscal_snapshots(period_id);
+
+-- ---------------------------------------------------------------------------
+-- 3. FUNÇÃO E TRIGGERS: IMPEDIR ALTERAÇÕES EM MESES FECHADOS
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_check_fiscal_period_open()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_month TEXT;
+    target_household UUID;
+    period_status TEXT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_month := OLD.competence_month;
+        target_household := OLD.household_id;
+    ELSE
+        target_month := NEW.competence_month;
+        target_household := NEW.household_id;
+    END IF;
+
+    SELECT status INTO period_status
+    FROM fiscal_periods
+    WHERE household_id = target_household
+      AND competence_month = target_month;
+
+    IF period_status = 'closed' THEN
+        RAISE EXCEPTION 'A competência % está fechada para o núcleo financeiro %. Operação % bloqueada.',
+            target_month, target_household, TG_OP;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    ELSE
+        RETURN NEW;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_check_fiscal_period_transactions
+BEFORE INSERT OR UPDATE OR DELETE ON transactions
+FOR EACH ROW EXECUTE FUNCTION fn_check_fiscal_period_open();

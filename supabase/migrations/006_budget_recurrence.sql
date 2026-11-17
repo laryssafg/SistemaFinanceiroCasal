@@ -107,3 +107,10 @@ COMMENT ON TABLE recurrence_rules IS 'Regras de lançamentos recorrentes. Geram 
 
 CREATE INDEX idx_rr_household ON recurrence_rules(household_id);
 CREATE INDEX idx_rr_member ON recurrence_rules(member_id);
+
+-- ---------------------------------------------------------------------------
+-- 5. ADICIONAR FK de transactions.recurrence_rule_id
+-- ---------------------------------------------------------------------------
+ALTER TABLE transactions
+    ADD CONSTRAINT fk_tx_recurrence_rule
+    FOREIGN KEY (recurrence_rule_id) REFERENCES recurrence_rules(id) ON DELETE SET NULL;

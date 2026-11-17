@@ -134,6 +134,7 @@ export interface BankAccountRow {
   account_type: AccountType;
   opening_balance: number; // centavos
   is_active: boolean;
+  is_emergency_reserve: boolean;
   created_at: ISOTimestamp;
   updated_at: ISOTimestamp;
 }
@@ -424,6 +425,7 @@ export interface EmergencyReserveConfigRow {
   household_id: UUID;
   is_configured: boolean;
   linked_asset_id: UUID | null;
+  linked_account_id: UUID | null;
   essential_monthly_baseline: number; // centavos
   target_months: number;
   target_amount: number;

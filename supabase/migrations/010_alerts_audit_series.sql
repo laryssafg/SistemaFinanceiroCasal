@@ -92,3 +92,17 @@ CREATE TABLE monthly_series (
 COMMENT ON TABLE monthly_series IS 'Série mensal agregada para gráficos de evolução patrimonial.';
 
 CREATE INDEX idx_ms_household ON monthly_series(household_id);
+
+-- ---------------------------------------------------------------------------
+-- 4. TRIGGER: IMUTABILIDADE DA TRILHA DE AUDITORIA
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_prevent_audit_log_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Registros de auditoria são estritamente imutáveis e não podem ser alterados ou excluídos.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_logs_immutable
+BEFORE UPDATE OR DELETE ON audit_logs
+FOR EACH ROW EXECUTE FUNCTION fn_prevent_audit_log_mutation();

@@ -143,8 +143,9 @@ CREATE TABLE emergency_reserve_configs (
     household_id                UUID NOT NULL UNIQUE REFERENCES households(id) ON DELETE CASCADE,
     is_configured               BOOLEAN NOT NULL DEFAULT FALSE,
     
-    -- Referência ao investimento que serve como reserva
+    -- Referência ao investimento OU conta bancária que serve como reserva
     linked_asset_id             UUID REFERENCES investment_assets(id) ON DELETE SET NULL,
+    linked_account_id           UUID REFERENCES bank_accounts(id) ON DELETE SET NULL,
     
     -- Parâmetros em centavos
     essential_monthly_baseline  BIGINT NOT NULL DEFAULT 0 CHECK (essential_monthly_baseline >= 0),
@@ -153,7 +154,11 @@ CREATE TABLE emergency_reserve_configs (
     monthly_planned_deposit     BIGINT NOT NULL DEFAULT 0 CHECK (monthly_planned_deposit >= 0),
     
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_erc_single_link CHECK (
+        linked_asset_id IS NULL OR linked_account_id IS NULL
+    )
 );
 
 COMMENT ON TABLE emergency_reserve_configs IS 'Configuração da reserva de emergência conjunta. Meta: 12 meses de essenciais.';

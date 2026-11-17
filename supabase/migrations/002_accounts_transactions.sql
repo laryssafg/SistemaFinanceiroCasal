@@ -17,6 +17,7 @@ CREATE TABLE bank_accounts (
     account_type    TEXT NOT NULL CHECK (account_type IN ('checking', 'savings', 'digital')),
     opening_balance BIGINT NOT NULL DEFAULT 0,  -- centavos
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    is_emergency_reserve BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -134,6 +135,7 @@ SELECT
     ba.account_name,
     ba.account_type,
     ba.is_active,
+    ba.is_emergency_reserve,
     ba.opening_balance,
     COALESCE(credits.total, 0) AS total_credits,
     COALESCE(debits.total, 0) AS total_debits,

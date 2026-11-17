@@ -144,7 +144,7 @@ CREATE TABLE settlement_transfers (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     household_id    UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     settlement_id   UUID NOT NULL REFERENCES couple_settlements(id) ON DELETE RESTRICT,
-    transaction_id  UUID NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
+    transaction_id  UUID NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE RESTRICT,
     amount          BIGINT NOT NULL CHECK (amount > 0),  -- centavos
     transfer_date   DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
