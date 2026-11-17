@@ -278,7 +278,7 @@ export function MetasPage() {
               <input
                 required
                 type="number"
-                step="10"
+                step="0.01"
                 value={targetAmount}
                 onChange={(e) => setTargetAmount(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
@@ -290,7 +290,7 @@ export function MetasPage() {
               </label>
               <input
                 type="number"
-                step="10"
+                step="0.01"
                 value={currentAmount}
                 onChange={(e) => setCurrentAmount(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
@@ -303,7 +303,7 @@ export function MetasPage() {
               <input
                 required
                 type="number"
-                step="10"
+                step="0.01"
                 value={monthlyPlanned}
                 onChange={(e) => setMonthlyPlanned(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"

@@ -251,8 +251,8 @@ export function OrcamentoPage() {
             <input
               required
               type="number"
-              step="10"
-              min="1"
+              step="0.01"
+              min="0.01"
               value={newCatLimit}
               onChange={(e) => setNewCatLimit(e.target.value)}
               placeholder="0,00"
@@ -300,8 +300,8 @@ export function OrcamentoPage() {
             <input
               required
               type="number"
-              step="10"
-              min="50"
+              step="0.01"
+              min="0.01"
               value={newLimitInput}
               onChange={(e) => setNewLimitInput(e.target.value)}
               className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"

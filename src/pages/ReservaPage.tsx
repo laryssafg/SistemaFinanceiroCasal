@@ -365,8 +365,8 @@ export function ReservaPage() {
             <input
               required
               type="number"
-              step="10"
-              min="1"
+              step="0.01"
+              min="0.01"
               value={baselineInput}
               onChange={(e) => setBaselineInput(e.target.value)}
               placeholder="0,00"
@@ -394,7 +394,7 @@ export function ReservaPage() {
               </label>
               <input
                 type="number"
-                step="10"
+                step="0.01"
                 min="0"
                 value={plannedInput}
                 onChange={(e) => setPlannedInput(e.target.value)}
