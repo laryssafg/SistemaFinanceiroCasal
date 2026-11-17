@@ -1,9 +1,20 @@
 import { supabase } from '../lib/supabaseClient';
 import type { Database } from '../types/supabase';
-import type { BankAccount, PartnerId, Transaction, TransactionStatus, TransactionType, PaymentMethod, ExpenseScope } from '../types/finance';
+import type {
+  BankAccount,
+  CreditCard,
+  CreditCardInstallment,
+  PartnerId,
+  Transaction,
+  TransactionStatus,
+  TransactionType,
+  PaymentMethod,
+  ExpenseScope,
+} from '../types/finance';
 
 type BankAccountUpdate = Database['public']['Tables']['bank_accounts']['Update'];
 type TransactionUpdate = Database['public']['Tables']['transactions']['Update'];
+type CreditCardUpdate = Database['public']['Tables']['credit_cards']['Update'];
 
 /**
  * Converte valor em reais (float) para centavos inteiros (BIGINT)
@@ -44,7 +55,7 @@ export interface CreateTransactionDTO {
   paidAmount?: number;
   description: string;
   category: string;
-  date: string; // YYYY-MM-DD
+  date: string; // ISO ou 'YYYY-MM-DD'
   paymentMethod: PaymentMethod;
   scope: ExpenseScope;
   notes?: string;
@@ -59,87 +70,94 @@ export interface UpdateTransactionDTO {
   notes?: string;
 }
 
-/**
- * Mapeamento de tipo de movimentação entre o modelo do frontend e o PostgreSQL
- */
-function mapFrontendTypeToDb(type: TransactionType): string {
-  switch (type) {
-    case 'income':
-      return 'income';
-    case 'expense':
-      return 'expense';
-    case 'transfer':
-      return 'transfer_out';
-    case 'invoice_payment':
-      return 'invoice_payment';
-    default:
-      return 'expense';
-  }
+export interface CreateCreditCardDTO {
+  ownerId: PartnerId;
+  additionalHolderId?: PartnerId;
+  name: string;
+  bank: string;
+  brand: 'Mastercard' | 'Visa' | 'Elo' | 'Amex' | 'Hipercard';
+  creditLimit: number;
+  closingDay: number;
+  dueDay: number;
+  lastFourDigits: string;
+  additionalLastFourDigits?: string;
 }
 
-function mapDbTypeToFrontend(dbType: string): TransactionType {
-  switch (dbType) {
-    case 'income':
-      return 'income';
-    case 'expense':
-      return 'expense';
-    case 'transfer_in':
-    case 'transfer_out':
-      return 'transfer';
-    case 'invoice_payment':
-      return 'invoice_payment';
-    default:
-      return 'expense';
-  }
+export interface UpdateCreditCardDTO {
+  name?: string;
+  bank?: string;
+  creditLimit?: number;
+  closingDay?: number;
+  dueDay?: number;
+  lastFourDigits?: string;
+  additionalHolderId?: PartnerId | null;
+  additionalLastFourDigits?: string | null;
+  isActive?: boolean;
+}
+
+export interface CreateCardPurchaseDTO {
+  cardId: string;
+  buyerId: PartnerId;
+  description: string;
+  category: string;
+  amount: number;
+  installments: number;
+  scope: ExpenseScope;
+  purchaseDate?: string;
+  isAdditional?: boolean;
 }
 
 /**
- * Camada de Acesso a Dados — Contas Bancárias
+ * ============================================================================
+ * SERVIÇO: CONTAS BANCÁRIAS
+ * ============================================================================
  */
 export const accountService = {
   /**
-   * Lista as contas bancárias do núcleo com os saldos derivados calculados pela view oficial
+   * Lista todas as contas do núcleo com saldo derivado da view segura
    */
-  async listAccounts(householdMembersMap: Record<string, { partnerId: PartnerId }>): Promise<BankAccount[]> {
+  async listAccounts(
+    membersMap: Record<string, { partnerId: PartnerId; name: string }>,
+  ): Promise<BankAccount[]> {
     const { data, error } = await supabase
       .from('v_bank_account_balances')
       .select('*')
       .order('account_name', { ascending: true });
 
     if (error) {
-      console.error('Erro ao buscar contas bancárias:', error.message);
+      console.error('Erro ao listar contas bancárias:', error.message);
       throw new Error(`Falha ao carregar contas bancárias: ${error.message}`);
     }
 
     if (!data) return [];
 
-    return data.map((row: any) => {
-      const memberInfo = householdMembersMap[row.member_id];
-      const partnerId: PartnerId = memberInfo ? memberInfo.partnerId : 'partner_a';
+    return data.map((row) => {
+      const memberInfo = row.member_id ? membersMap[row.member_id] : undefined;
+      const partnerId: PartnerId = memberInfo?.partnerId ?? 'partner_a';
 
       return {
         id: row.account_id,
         partnerId,
         institution: row.institution,
         accountName: row.account_name,
-        accountType: row.account_type as 'checking' | 'savings' | 'digital',
+        accountType: (row.account_type as 'checking' | 'savings' | 'digital') ?? 'checking',
         openingBalance: fromCents(row.opening_balance),
         currentBalance: fromCents(row.current_balance),
-        lastUpdated: new Date().toISOString().split('T')[0],
-        active: row.is_active,
+        lastUpdated: '',
+        active: Boolean(row.is_active),
       };
     });
   },
 
   /**
-   * Cria nova conta bancária no núcleo
+   * Cria uma nova conta bancária vinculada ao núcleo e membro
    */
   async createAccount(
     dto: CreateAccountDTO,
     householdId: string,
     memberId: string,
   ): Promise<string> {
-    const openingBalanceCents = toCents(dto.openingBalance);
+    const openingCents = toCents(dto.openingBalance);
 
     const { data, error } = await supabase
       .from('bank_accounts')
@@ -149,15 +167,14 @@ export const accountService = {
         institution: dto.institution.trim(),
         account_name: dto.accountName.trim(),
         account_type: dto.accountType,
-        opening_balance: openingBalanceCents,
+        opening_balance: openingCents,
         is_active: true,
-        is_emergency_reserve: false,
       })
       .select('id')
       .single();
 
     if (error) {
-      console.error('Erro ao criar conta bancária:', error.message);
+      console.error('Erro ao cadastrar conta bancária:', error.message);
       throw new Error(`Falha ao cadastrar conta bancária: ${error.message}`);
     }
 
@@ -165,7 +182,7 @@ export const accountService = {
   },
 
   /**
-   * Atualiza dados permitidos de uma conta bancária
+   * Atualiza dados cadastrais de uma conta existente
    */
   async updateAccount(accountId: string, dto: UpdateAccountDTO): Promise<void> {
     const payload: BankAccountUpdate = {};
@@ -187,14 +204,16 @@ export const accountService = {
 };
 
 /**
- * Camada de Acesso a Dados — Movimentações Financeiras
+ * ============================================================================
+ * SERVIÇO: MOVIMENTAÇÕES FINANCEIRAS (TRANSACTIONS)
+ * ============================================================================
  */
 export const transactionService = {
   /**
-   * Lista movimentações do núcleo com suporte a ordenação decrescente por data
+   * Lista movimentações financeiras do núcleo
    */
   async listTransactions(
-    householdMembersMap: Record<string, { partnerId: PartnerId; name: string }>,
+    membersMap: Record<string, { partnerId: PartnerId; name: string }>,
   ): Promise<Transaction[]> {
     const { data, error } = await supabase
       .from('transactions')
@@ -203,51 +222,48 @@ export const transactionService = {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Erro ao buscar movimentações:', error.message);
+      console.error('Erro ao carregar movimentações:', error.message);
       throw new Error(`Falha ao carregar movimentações: ${error.message}`);
     }
 
     if (!data) return [];
 
-    return data.map((row: any) => {
-      const memberInfo = householdMembersMap[row.member_id];
-      const partnerId: PartnerId = memberInfo ? memberInfo.partnerId : 'partner_a';
-      const actorName = memberInfo ? memberInfo.name : 'Titular';
+    return data.map((row) => {
+      const memberInfo = row.member_id ? membersMap[row.member_id] : undefined;
+      const partnerId: PartnerId = memberInfo?.partnerId ?? 'partner_a';
+
+      let uiType: TransactionType = 'expense';
+      if (row.transaction_type === 'income') uiType = 'income';
+      else if (row.transaction_type === 'transfer_in' || row.transaction_type === 'transfer_out') {
+        uiType = 'transfer';
+      } else if (row.transaction_type === 'invoice_payment') {
+        uiType = 'invoice_payment';
+      }
 
       return {
         id: row.id,
         date: row.transaction_date,
         description: row.description,
         category: row.category,
-        type: mapDbTypeToFrontend(row.transaction_type),
-        status: (row.status === 'confirmed' || row.status === 'pending' || row.status === 'scheduled'
-          ? row.status
-          : 'confirmed') as TransactionStatus,
+        type: uiType,
+        status: row.status as TransactionStatus,
         amount: fromCents(row.amount),
         paidAmount: row.paid_amount ? fromCents(row.paid_amount) : undefined,
         partnerId,
-        scope: (row.scope === 'shared' ? 'shared' : 'individual') as ExpenseScope,
+        scope: row.scope as ExpenseScope,
         paymentMethod: row.payment_method as PaymentMethod,
         accountId: row.account_id ?? undefined,
         cardId: row.card_id ?? undefined,
-        benefitId: row.benefit_card_id ?? undefined,
         installmentCurrent: row.installment_current ?? undefined,
         installmentTotal: row.installment_total ?? undefined,
-        isRecurring: row.is_recurring ?? false,
+        isRecurring: row.is_recurring,
         notes: row.notes ?? undefined,
-        historyLog: [
-          {
-            date: row.created_at,
-            actor: actorName,
-            change: 'Registro gravado no banco de dados Supabase.',
-          },
-        ],
       };
     });
   },
 
   /**
-   * Cria nova receita ou despesa no banco de dados
+   * Registra uma nova movimentação financeira
    */
   async createTransaction(
     dto: CreateTransactionDTO,
@@ -255,8 +271,13 @@ export const transactionService = {
     memberId: string,
   ): Promise<string> {
     const amountCents = toCents(dto.amount);
-    const paidAmountCents = dto.paidAmount ? toCents(dto.paidAmount) : null;
-    const competenceMonth = dto.date.slice(0, 7);
+    const paidCents = dto.paidAmount != null ? toCents(dto.paidAmount) : null;
+    const dateStr = dto.date.includes('T') ? dto.date.split('T')[0] : dto.date;
+    const competenceMonth = dateStr.slice(0, 7);
+
+    let dbType: 'income' | 'expense' | 'invoice_payment' | 'transfer_in' | 'transfer_out' = 'expense';
+    if (dto.type === 'income') dbType = 'income';
+    else if (dto.type === 'invoice_payment') dbType = 'invoice_payment';
 
     const { data, error } = await supabase
       .from('transactions')
@@ -264,24 +285,23 @@ export const transactionService = {
         household_id: householdId,
         member_id: memberId,
         account_id: dto.accountId || null,
-        transaction_type: mapFrontendTypeToDb(dto.type),
+        transaction_type: dbType,
         status: dto.status,
         scope: dto.scope,
         payment_method: dto.paymentMethod,
         amount: amountCents,
-        paid_amount: paidAmountCents,
+        paid_amount: paidCents,
         description: dto.description.trim(),
-        category: dto.category.trim(),
-        transaction_date: dto.date,
+        category: dto.category.trim() || 'Outros',
+        transaction_date: dateStr,
         competence_month: competenceMonth,
-        notes: dto.notes?.trim() || null,
-        is_recurring: false,
+        notes: dto.notes ? dto.notes.trim() : null,
       })
       .select('id')
       .single();
 
     if (error) {
-      console.error('Erro ao criar movimentação:', error.message);
+      console.error('Erro ao registrar movimentação:', error.message);
       throw new Error(`Falha ao registrar movimentação: ${error.message}`);
     }
 
@@ -351,6 +371,230 @@ export const transactionService = {
     if (error) {
       console.error('Erro na transferência atômica:', error.message);
       throw new Error(`Falha na transferência bancária: ${error.message}`);
+    }
+  },
+};
+
+/**
+ * ============================================================================
+ * SERVIÇO: CARTÕES DE CRÉDITO, PARCELAS E FATURAS
+ * ============================================================================
+ */
+export const creditCardService = {
+  /**
+   * Lista todos os cartões de crédito do casal com saldos de fatura derivados
+   */
+  async listCards(
+    membersMap: Record<string, { partnerId: PartnerId; name: string }>,
+  ): Promise<CreditCard[]> {
+    const { data, error } = await supabase
+      .from('v_credit_card_details')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Erro ao listar cartões de crédito:', error.message);
+      throw new Error(`Falha ao carregar cartões de crédito: ${error.message}`);
+    }
+
+    if (!data) return [];
+
+    return data.map((row) => {
+      const ownerInfo = row.owner_id ? membersMap[row.owner_id] : undefined;
+      const ownerId: PartnerId = ownerInfo?.partnerId ?? 'partner_a';
+
+      const addInfo = row.additional_holder_id ? membersMap[row.additional_holder_id] : undefined;
+      const additionalHolderId: PartnerId | undefined = addInfo?.partnerId;
+
+      return {
+        id: row.id,
+        name: row.card_name,
+        bank: row.bank,
+        brand: (row.brand as 'Mastercard' | 'Visa') ?? 'Mastercard',
+        ownerId,
+        additionalHolderId,
+        creditLimit: fromCents(row.credit_limit),
+        currentInvoiceAmount: fromCents(row.current_invoice_amount),
+        closedInvoiceAmount: fromCents(row.closed_invoice_amount),
+        closedInvoicePaid: Boolean(row.closed_invoice_paid),
+        closingDay: row.closing_day,
+        dueDay: row.due_day,
+        lastFourDigits: row.last_four_digits ? row.last_four_digits.trim() : '0000',
+        additionalLastFourDigits: row.additional_last_four ? row.additional_last_four.trim() : undefined,
+      };
+    });
+  },
+
+  /**
+   * Cria um novo cartão de crédito para o casal
+   */
+  async createCard(
+    dto: CreateCreditCardDTO,
+    householdId: string,
+    ownerMemberId: string,
+    additionalMemberId?: string,
+  ): Promise<string> {
+    const limitCents = toCents(dto.creditLimit);
+
+    const { data, error } = await supabase
+      .from('credit_cards')
+      .insert({
+        household_id: householdId,
+        owner_id: ownerMemberId,
+        additional_holder_id: additionalMemberId || null,
+        card_name: dto.name.trim(),
+        bank: dto.bank.trim(),
+        brand: dto.brand,
+        credit_limit: limitCents,
+        closing_day: dto.closingDay,
+        due_day: dto.dueDay,
+        last_four_digits: dto.lastFourDigits.trim().slice(-4),
+        additional_last_four: dto.additionalLastFourDigits ? dto.additionalLastFourDigits.trim().slice(-4) : null,
+        is_active: true,
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('Erro ao cadastrar cartão de crédito:', error.message);
+      throw new Error(`Falha ao cadastrar cartão de crédito: ${error.message}`);
+    }
+
+    return data.id;
+  },
+
+  /**
+   * Atualiza dados de um cartão de crédito existente
+   */
+  async updateCard(cardId: string, dto: UpdateCreditCardDTO): Promise<void> {
+    const payload: CreditCardUpdate = {};
+    if (dto.name !== undefined) payload.card_name = dto.name.trim();
+    if (dto.bank !== undefined) payload.bank = dto.bank.trim();
+    if (dto.creditLimit !== undefined) payload.credit_limit = toCents(dto.creditLimit);
+    if (dto.closingDay !== undefined) payload.closing_day = dto.closingDay;
+    if (dto.dueDay !== undefined) payload.due_day = dto.dueDay;
+    if (dto.lastFourDigits !== undefined) payload.last_four_digits = dto.lastFourDigits.trim().slice(-4);
+    if (dto.additionalLastFourDigits !== undefined) {
+      payload.additional_last_four = dto.additionalLastFourDigits ? dto.additionalLastFourDigits.trim().slice(-4) : null;
+    }
+    if (dto.isActive !== undefined) payload.is_active = dto.isActive;
+
+    const { error } = await supabase
+      .from('credit_cards')
+      .update(payload)
+      .eq('id', cardId);
+
+    if (error) {
+      console.error('Erro ao atualizar cartão de crédito:', error.message);
+      throw new Error(`Falha ao atualizar cartão de crédito: ${error.message}`);
+    }
+  },
+
+  /**
+   * Lista as parcelas futuras de compras parceladas do núcleo
+   */
+  async listInstallments(
+    membersMap: Record<string, { partnerId: PartnerId; name: string }>,
+  ): Promise<CreditCardInstallment[]> {
+    const { data, error } = await supabase
+      .from('credit_card_installments')
+      .select(`
+        id,
+        purchase_id,
+        installment_number,
+        installment_amount,
+        due_month,
+        credit_card_purchases (
+          id,
+          card_id,
+          buyer_id,
+          description,
+          category,
+          scope,
+          purchase_date,
+          total_amount,
+          total_installments,
+          is_additional_card
+        )
+      `)
+      .order('due_month', { ascending: true });
+
+    if (error) {
+      console.error('Erro ao listar parcelas de cartão:', error.message);
+      return [];
+    }
+
+    if (!data) return [];
+
+    return data
+      .filter((row) => row.credit_card_purchases != null)
+      .map((row) => {
+        const purchase = row.credit_card_purchases as any;
+        const buyerInfo = purchase.buyer_id ? membersMap[purchase.buyer_id] : undefined;
+        const buyerId: PartnerId = buyerInfo?.partnerId ?? 'partner_a';
+
+        return {
+          id: row.id,
+          cardId: purchase.card_id,
+          description: purchase.description,
+          buyerId,
+          scope: purchase.scope as ExpenseScope,
+          category: purchase.category,
+          purchaseDate: purchase.purchase_date,
+          totalAmount: fromCents(purchase.total_amount),
+          installmentAmount: fromCents(row.installment_amount),
+          currentInstallment: row.installment_number,
+          totalInstallments: purchase.total_installments,
+          isAdditionalCard: purchase.is_additional_card,
+        };
+      });
+  },
+
+  /**
+   * Registra uma compra atômica no cartão (à vista ou parcelada)
+   */
+  async createPurchase(dto: CreateCardPurchaseDTO, buyerMemberId: string): Promise<void> {
+    const amountCents = toCents(dto.amount);
+
+    const { error } = await supabase.rpc('create_credit_card_purchase', {
+      p_card_id: dto.cardId,
+      p_buyer_id: buyerMemberId,
+      p_description: dto.description.trim(),
+      p_category: dto.category.trim() || 'Outros',
+      p_amount: amountCents,
+      p_installments: dto.installments,
+      p_scope: dto.scope,
+      p_purchase_date: dto.purchaseDate || new Date().toISOString().split('T')[0],
+      p_is_additional: Boolean(dto.isAdditional),
+    });
+
+    if (error) {
+      console.error('Erro ao registrar compra no cartão:', error.message);
+      throw new Error(`Falha ao registrar compra no cartão: ${error.message}`);
+    }
+  },
+
+  /**
+   * Executa pagamento atômico de fatura debitando a conta bancária
+   */
+  async payInvoice(params: {
+    cardId: string;
+    accountId: string;
+    amount: number;
+    paymentDate?: string;
+  }): Promise<void> {
+    const amountCents = toCents(params.amount);
+
+    const { error } = await supabase.rpc('pay_credit_card_invoice', {
+      p_card_id: params.cardId,
+      p_account_id: params.accountId,
+      p_amount: amountCents,
+      p_payment_date: params.paymentDate || new Date().toISOString().split('T')[0],
+    });
+
+    if (error) {
+      console.error('Erro ao registrar pagamento de fatura:', error.message);
+      throw new Error(`Falha ao pagar fatura: ${error.message}`);
     }
   },
 };

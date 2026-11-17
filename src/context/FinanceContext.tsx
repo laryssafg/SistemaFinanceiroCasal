@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { accountService, transactionService } from '../services/financeDataService';
+import { accountService, transactionService, creditCardService } from '../services/financeDataService';
 import {
   INITIAL_ALERTS,
   INITIAL_AUDIT_LOGS,
@@ -151,9 +151,10 @@ interface FinanceContextValue {
     scope: 'individual' | 'shared';
   }) => void;
   cards: CreditCard[];
-  addCreditCard: (card: Omit<CreditCard, 'id'>) => void;
+  addCreditCard: (card: Omit<CreditCard, 'id'>) => Promise<void>;
+  updateCreditCard: (cardId: string, updates: Partial<CreditCard>) => Promise<void>;
   installments: CreditCardInstallment[];
-  payCardInvoice: (cardId: string, accountId: string, amount: number) => void;
+  payCardInvoice: (cardId: string, accountId: string, amount: number) => Promise<void>;
   budgets: BudgetCategory[];
   addBudgetCategory: (budget: Omit<BudgetCategory, 'id'>) => void;
   updateBudgetLimit: (id: string, newLimit: number) => void;
@@ -210,9 +211,47 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [initialConfig] = useState<StoredPreviewConfig>(() => loadStoredConfig());
   const [activePage, setActivePage] = useState<NavSectionId>('dashboard');
   const [theme, setTheme] = useState<ThemeMode>(initialConfig.theme ?? 'light');
+  const partnersFromAuth = useMemo<PartnerProfile[]>(() => {
+    if (!isAuthenticated || !household?.id) {
+      return initialConfig.partners ?? INITIAL_PARTNERS;
+    }
+    const list: PartnerProfile[] = [];
+    if (memberProfile) {
+      list.push({
+        id: memberProfile.partner_role as PartnerId,
+        name: memberProfile.display_name || memberProfile.short_name || 'Titular 1',
+        shortName: memberProfile.short_name || 'Titular 1',
+        email: memberProfile.email || '',
+        roleLabel: memberProfile.role_label || 'Titular 1',
+        photoDataUrl: memberProfile.photo_url || undefined,
+        monthlyNetIncomeConfirmed: 0,
+        monthlyNetIncomeEstimated: 0,
+      });
+    }
+    if (partnerProfile) {
+      list.push({
+        id: partnerProfile.partner_role as PartnerId,
+        name: partnerProfile.display_name || partnerProfile.short_name || 'Titular 2',
+        shortName: partnerProfile.short_name || 'Titular 2',
+        email: partnerProfile.email || '',
+        roleLabel: partnerProfile.role_label || 'Titular 2',
+        photoDataUrl: partnerProfile.photo_url || undefined,
+        monthlyNetIncomeConfirmed: 0,
+        monthlyNetIncomeEstimated: 0,
+      });
+    }
+    return list;
+  }, [isAuthenticated, household?.id, memberProfile, partnerProfile, initialConfig.partners]);
+
   const [partners, setPartners] = useState<PartnerProfile[]>(
     initialConfig.partners ?? INITIAL_PARTNERS,
   );
+
+  useEffect(() => {
+    if (isAuthenticated && household?.id) {
+      setPartners(partnersFromAuth);
+    }
+  }, [isAuthenticated, household?.id, partnersFromAuth]);
   const [financialSettings, setFinancialSettings] = useState<FinancialSettings>(
     initialConfig.financialSettings ?? DEFAULT_FINANCIAL_SETTINGS,
   );
@@ -248,17 +287,23 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       // Modo não autenticado: dados de demonstração
       setAccounts(INITIAL_BANK_ACCOUNTS);
       setTransactions(INITIAL_TRANSACTIONS);
+      setCards(INITIAL_CREDIT_CARDS);
+      setInstallments(INITIAL_CREDIT_CARD_INSTALLMENTS);
       return;
     }
 
     try {
       setIsDataLoading(true);
-      const [dbAccounts, dbTransactions] = await Promise.all([
+      const [dbAccounts, dbTransactions, dbCards, dbInstallments] = await Promise.all([
         accountService.listAccounts(householdMembersMap),
         transactionService.listTransactions(householdMembersMap),
+        creditCardService.listCards(householdMembersMap),
+        creditCardService.listInstallments(householdMembersMap),
       ]);
       setAccounts(dbAccounts);
       setTransactions(dbTransactions);
+      setCards(dbCards);
+      setInstallments(dbInstallments);
     } catch (err: any) {
       console.error('Falha ao carregar dados do Supabase:', err);
       showToast('Erro ao sincronizar dados com o banco.');
@@ -573,8 +618,27 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           targetMemberId = partnerProfile.id;
         }
 
-        // Se for receita ou despesa padrão
-        if (tx.type === 'income' || tx.type === 'expense') {
+        // Se for compra no cartão de crédito
+        if (tx.type === 'expense' && tx.paymentMethod === 'credit_card' && tx.cardId) {
+          const isAdditional = tx.cardId
+            ? Boolean(cards.find((c) => c.id === tx.cardId)?.ownerId !== tx.partnerId)
+            : false;
+
+          await creditCardService.createPurchase(
+            {
+              cardId: tx.cardId,
+              buyerId: tx.partnerId,
+              description: tx.description,
+              category: tx.category,
+              amount: tx.amount,
+              installments: tx.installmentTotal ?? 1,
+              scope: tx.scope,
+              purchaseDate: tx.date.split('T')[0],
+              isAdditional,
+            },
+            targetMemberId,
+          );
+        } else if (tx.type === 'income' || tx.type === 'expense') {
           await transactionService.createTransaction(
             {
               partnerId: tx.partnerId,
@@ -793,7 +857,50 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     showToast(`Compra registrada no ${card.type} sem afetar contas bancárias.`);
   };
 
-  const addCreditCard = (card: Omit<CreditCard, 'id'>) => {
+  const addCreditCard = async (card: Omit<CreditCard, 'id'>) => {
+    if (isLiveDatabase && household?.id && memberProfile?.id) {
+      try {
+        setIsDataLoading(true);
+        const ownerMemberId =
+          card.ownerId === memberProfile.partner_role
+            ? memberProfile.id
+            : partnerProfile?.id ?? memberProfile.id;
+
+        const additionalMemberId = card.additionalHolderId
+          ? card.additionalHolderId === memberProfile.partner_role
+            ? memberProfile.id
+            : partnerProfile?.id
+          : undefined;
+
+        await creditCardService.createCard(
+          {
+            name: card.name,
+            bank: card.bank,
+            brand: card.brand as any,
+            ownerId: card.ownerId,
+            creditLimit: card.creditLimit,
+            closingDay: card.closingDay,
+            dueDay: card.dueDay,
+            lastFourDigits: card.lastFourDigits,
+            additionalHolderId: card.additionalHolderId,
+            additionalLastFourDigits: card.additionalLastFourDigits,
+          },
+          household.id,
+          ownerMemberId,
+          additionalMemberId,
+        );
+        await refreshFinancialData();
+        showToast('Cartão de crédito cadastrado com sucesso!');
+      } catch (err: any) {
+        console.error('Erro ao cadastrar cartão:', err);
+        showToast(`Erro ao cadastrar cartão: ${err.message}`);
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
     const newCard: CreditCard = { ...card, id: `card_${Date.now()}` };
     setCards((prev) => [newCard, ...prev]);
     appendAuditLog({
@@ -806,7 +913,57 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     showToast('Cartão cadastrado na prévia.');
   };
 
-  const payCardInvoice = (cardId: string, accountId: string, amount: number) => {
+  const updateCreditCard = async (cardId: string, updates: Partial<CreditCard>) => {
+    if (isLiveDatabase) {
+      try {
+        setIsDataLoading(true);
+        await creditCardService.updateCard(cardId, {
+          name: updates.name,
+          bank: updates.bank,
+          creditLimit: updates.creditLimit,
+          closingDay: updates.closingDay,
+          dueDay: updates.dueDay,
+          lastFourDigits: updates.lastFourDigits,
+          additionalHolderId: updates.additionalHolderId,
+          additionalLastFourDigits: updates.additionalLastFourDigits,
+        });
+        await refreshFinancialData();
+        showToast('Cartão de crédito atualizado com sucesso!');
+      } catch (err: any) {
+        console.error('Erro ao atualizar cartão:', err);
+        showToast(`Erro ao atualizar cartão: ${err.message}`);
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
+    setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, ...updates } : c)));
+    showToast('Cartão atualizado na prévia.');
+  };
+
+  const payCardInvoice = async (cardId: string, accountId: string, amount: number) => {
+    if (isLiveDatabase && household?.id) {
+      try {
+        setIsDataLoading(true);
+        await creditCardService.payInvoice({
+          cardId,
+          accountId,
+          amount,
+        });
+        await refreshFinancialData();
+        showToast('Pagamento de fatura registrado sem duplicar despesa de consumo!');
+      } catch (err: any) {
+        console.error('Erro ao pagar fatura:', err);
+        showToast(`Erro ao pagar fatura: ${err.message}`);
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+      return;
+    }
+
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
 
@@ -1066,6 +1223,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     registerBenefitPurchase,
     cards,
     addCreditCard,
+    updateCreditCard,
     installments,
     payCardInvoice,
     budgets,

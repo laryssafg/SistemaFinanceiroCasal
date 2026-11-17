@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CreditCard as CardIcon, Info, Plus } from 'lucide-react';
+import { CreditCard as CardIcon, Edit, Info, Plus } from 'lucide-react';
 import { EmptyState } from '../components/ui/FeedbackStates';
 import { Modal } from '../components/ui/Modal';
 import {
@@ -16,11 +16,13 @@ export function CartoesPage() {
   const {
     cards,
     addCreditCard,
+    updateCreditCard,
     installments,
     transactions,
     accounts,
     partners,
     payCardInvoice,
+    isDataLoading,
   } = useFinance();
 
   const [tab, setTab] = useState<'overview' | 'installments' | 'transactions'>('overview');
@@ -29,6 +31,7 @@ export function CartoesPage() {
   const [payAmount, setPayAmount] = useState('');
 
   const [isAddCardOpen, setIsAddCardOpen] = useState(false);
+  const [editingCard, setEditingCard] = useState<CreditCard | null>(null);
   const [cardName, setCardName] = useState('');
   const [cardBank, setCardBank] = useState('');
   const [cardOwner, setCardOwner] = useState<PartnerId>('partner_a');
@@ -47,20 +50,54 @@ export function CartoesPage() {
     if (ownerAcc) setPayAccountId(ownerAcc.id);
   };
 
-  const handlePaySubmit = (e: React.FormEvent) => {
+  const openEditModal = (card: CreditCard) => {
+    setEditingCard(card);
+    setCardName(card.name);
+    setCardBank(card.bank);
+    setCardOwner(card.ownerId);
+    setCardLimit(card.creditLimit.toFixed(2));
+    setClosingDay(String(card.closingDay));
+    setDueDay(String(card.dueDay));
+    setLastFour(card.lastFourDigits);
+  };
+
+  const handlePaySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!payingCard || !payAccountId) return;
+    if (!payingCard || !payAccountId || isDataLoading) return;
     const val = Number(payAmount.replace(',', '.'));
     if (isNaN(val) || val <= 0) return;
-    payCardInvoice(payingCard.id, payAccountId, val);
+    await payCardInvoice(payingCard.id, payAccountId, val);
     setPayingCard(null);
   };
 
-  const handleAddCardSubmit = (e: React.FormEvent) => {
+  const handleEditCardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editingCard || isDataLoading) return;
     const limit = Number(cardLimit.replace(',', '.')) || 0;
     if (!cardName.trim() || !cardBank.trim() || limit <= 0) return;
-    addCreditCard({
+
+    await updateCreditCard(editingCard.id, {
+      name: cardName.trim(),
+      bank: cardBank.trim(),
+      creditLimit: limit,
+      closingDay: Number(closingDay) || 20,
+      dueDay: Number(dueDay) || 27,
+      lastFourDigits: lastFour.trim().slice(-4) || '0000',
+    });
+
+    setEditingCard(null);
+    setCardName('');
+    setCardBank('');
+    setCardLimit('');
+    setLastFour('');
+  };
+
+  const handleAddCardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isDataLoading) return;
+    const limit = Number(cardLimit.replace(',', '.')) || 0;
+    if (!cardName.trim() || !cardBank.trim() || limit <= 0) return;
+    await addCreditCard({
       name: cardName.trim(),
       bank: cardBank.trim(),
       brand: 'Mastercard',
@@ -144,14 +181,24 @@ export function CartoesPage() {
                         <p className="text-xs text-slate-500 dark:text-slate-400">
                           Final {card.lastFourDigits} · Titular: {getPartnerName(partners, card.ownerId)}
                         </p>
-                        {card.additionalHolderId && (
+                        {(card.additionalHolderId || card.additionalLastFourDigits) && (
                           <p className="text-xs text-navy-700 dark:text-navy-300 mt-0.5">
-                            Cartão adicional ({card.additionalLastFourDigits}):{' '}
-                            {getPartnerName(partners, card.additionalHolderId)}
+                            Cartão adicional ({card.additionalLastFourDigits ?? '—'}):{' '}
+                            {card.additionalHolderId ? getPartnerName(partners, card.additionalHolderId) : 'Titular 2'}
                           </p>
                         )}
                       </div>
-                      <CardIcon className="w-5 h-5 text-navy-800 dark:text-navy-300 shrink-0" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(card)}
+                          className="p-1 text-slate-400 hover:text-navy-900 dark:hover:text-white rounded"
+                          title="Editar Cartão"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <CardIcon className="w-5 h-5 text-navy-800 dark:text-navy-300 shrink-0" />
+                      </div>
                     </div>
 
                     <div className="space-y-1.5 pt-2">
@@ -408,8 +455,8 @@ export function CartoesPage() {
               <input
                 required
                 type="number"
-                step="10"
-                min="1"
+                step="0.01"
+                min="0"
                 value={cardLimit}
                 onChange={(e) => setCardLimit(e.target.value)}
                 placeholder="0,00"
@@ -468,9 +515,120 @@ export function CartoesPage() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 disabled:opacity-40 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
             >
               Salvar Cartão
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={editingCard !== null}
+        onClose={() => setEditingCard(null)}
+        title="Editar Cartão de Crédito"
+        subtitle={editingCard ? `Editar dados e limite de ${editingCard.name}` : undefined}
+      >
+        <form onSubmit={handleEditCardSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Nome do Cartão
+              </label>
+              <input
+                required
+                type="text"
+                value={cardName}
+                onChange={(e) => setCardName(e.target.value)}
+                placeholder="Ex.: Nubank Ultravioleta"
+                className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Banco / Emissor
+              </label>
+              <input
+                required
+                type="text"
+                value={cardBank}
+                onChange={(e) => setCardBank(e.target.value)}
+                placeholder="Ex.: Nubank"
+                className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Limite Total (R$)
+            </label>
+            <input
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              value={cardLimit}
+              onChange={(e) => setCardLimit(e.target.value)}
+              placeholder="0,00"
+              className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Dia Fechamento
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={closingDay}
+                onChange={(e) => setClosingDay(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Dia Vencimento
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={dueDay}
+                onChange={(e) => setDueDay(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Últimos 4 dígitos
+              </label>
+              <input
+                type="text"
+                maxLength={4}
+                value={lastFour}
+                onChange={(e) => setLastFour(e.target.value)}
+                placeholder="1234"
+                className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setEditingCard(null)}
+              className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 disabled:opacity-40 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
+            >
+              Salvar Alterações
             </button>
           </div>
         </form>
