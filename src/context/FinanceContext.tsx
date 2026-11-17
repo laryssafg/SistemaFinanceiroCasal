@@ -129,6 +129,14 @@ interface FinanceContextValue {
   isDataLoading: boolean;
   refreshFinancialData: () => Promise<void>;
   isLiveDatabase: boolean;
+  executeTransfer: (params: {
+    fromAccountId: string;
+    toAccountId: string;
+    amount: number;
+    description?: string;
+    date?: string;
+    notes?: string;
+  }) => Promise<void>;
   accounts: BankAccount[];
   addBankAccount: (account: Omit<BankAccount, 'id' | 'lastUpdated'>) => void;
   transactions: Transaction[];
@@ -470,6 +478,89 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       ipOrOrigin: 'Prévia Web',
     });
     showToast('Conta bancária adicionada na prévia.');
+  };
+
+  const executeTransfer = async (params: {
+    fromAccountId: string;
+    toAccountId: string;
+    amount: number;
+    description?: string;
+    date?: string;
+    notes?: string;
+  }) => {
+    if (params.fromAccountId === params.toAccountId) {
+      showToast('A conta de origem e destino não podem ser a mesma.');
+      return;
+    }
+    if (params.amount <= 0) {
+      showToast('O valor da transferência deve ser maior que zero.');
+      return;
+    }
+
+    if (isLiveDatabase && household?.id) {
+      try {
+        setIsDataLoading(true);
+        await transactionService.executeTransfer(params);
+        await refreshFinancialData();
+        showToast('Transferência realizada com sucesso!');
+      } catch (err: any) {
+        console.error('Erro ao executar transferência:', err);
+        showToast(`Erro na transferência: ${err.message || 'Falha ao processar.'}`);
+        throw err;
+      } finally {
+        setIsDataLoading(false);
+      }
+    } else {
+      // Modo mock em memória
+      const fromAcc = accounts.find((a) => a.id === params.fromAccountId);
+      const toAcc = accounts.find((a) => a.id === params.toAccountId);
+      if (!fromAcc || !toAcc) {
+        showToast('Contas de transferência não encontradas.');
+        return;
+      }
+
+      setAccounts((prev) =>
+        prev.map((a) => {
+          if (a.id === params.fromAccountId) return { ...a, currentBalance: a.currentBalance - params.amount };
+          if (a.id === params.toAccountId) return { ...a, currentBalance: a.currentBalance + params.amount };
+          return a;
+        }),
+      );
+
+      const now = getNowDateTimeIso();
+      const outTx: Transaction = {
+        id: `tx_out_${Date.now()}`,
+        date: params.date ? `${params.date}T12:00` : now,
+        description: params.description || 'Transferência enviada',
+        category: 'Transferência',
+        type: 'transfer',
+        scope: 'individual',
+        paymentMethod: 'transfer',
+        partnerId: fromAcc.partnerId,
+        accountId: params.fromAccountId,
+        amount: params.amount,
+        status: 'confirmed',
+        notes: params.notes,
+      };
+
+      const inTx: Transaction = {
+        id: `tx_in_${Date.now() + 1}`,
+        date: params.date ? `${params.date}T12:00` : now,
+        description: params.description || 'Transferência recebida',
+        category: 'Transferência',
+        type: 'transfer',
+        scope: 'individual',
+        paymentMethod: 'transfer',
+        partnerId: toAcc.partnerId,
+        accountId: params.toAccountId,
+        amount: params.amount,
+        status: 'confirmed',
+        notes: params.notes,
+      };
+
+      setTransactions((prev) => [outTx, inTx, ...prev]);
+      showToast('Transferência simulada realizada com sucesso!');
+    }
   };
 
   const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
@@ -965,6 +1056,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     isDataLoading,
     refreshFinancialData,
     isLiveDatabase,
+    executeTransfer,
     accounts,
     addBankAccount,
     transactions,

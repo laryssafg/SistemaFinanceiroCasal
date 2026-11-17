@@ -38,6 +38,7 @@ export function MovimentacoesPage() {
   const {
     transactions,
     addTransaction,
+    executeTransfer,
     accounts,
     cards,
     benefits,
@@ -69,6 +70,7 @@ export function MovimentacoesPage() {
   const [txScope, setTxScope] = useState<ExpenseScope>('shared');
   const [txMethod, setTxMethod] = useState<PaymentMethod>('pix');
   const [txAccountId, setTxAccountId] = useState(accounts[0]?.id ?? '');
+  const [txDestinationAccountId, setTxDestinationAccountId] = useState(accounts[1]?.id ?? '');
   const [txCardId, setTxCardId] = useState(cards[0]?.id ?? '');
   const [txInstallments, setTxInstallments] = useState<number>(1);
   const [txDate, setTxDate] = useState(initialDateTime.date);
@@ -85,10 +87,17 @@ export function MovimentacoesPage() {
   useEffect(() => {
     if (accounts.length === 0) {
       setTxAccountId('');
-    } else if (!accounts.some((a) => a.id === txAccountId)) {
-      setTxAccountId(accounts[0].id);
+      setTxDestinationAccountId('');
+    } else {
+      if (!accounts.some((a) => a.id === txAccountId)) {
+        setTxAccountId(accounts[0].id);
+      }
+      if (!accounts.some((a) => a.id === txDestinationAccountId)) {
+        const dest = accounts.find((a) => a.id !== (txAccountId || accounts[0].id));
+        setTxDestinationAccountId(dest ? dest.id : accounts[0].id);
+      }
     }
-  }, [accounts, txAccountId, isNewModalOpen]);
+  }, [accounts, txAccountId, txDestinationAccountId, isNewModalOpen]);
 
   useEffect(() => {
     if (cards.length === 0) {
@@ -154,6 +163,27 @@ export function MovimentacoesPage() {
     const nowParts = getLocalDateTimeParts();
     const effectiveDate = txDate || nowParts.date;
     const effectiveTime = txTime || nowParts.time;
+
+    if (txType === 'transfer') {
+      if (!txAccountId || !txDestinationAccountId) return;
+      if (txAccountId === txDestinationAccountId) return;
+      executeTransfer({
+        fromAccountId: txAccountId,
+        toAccountId: txDestinationAccountId,
+        amount: numAmount,
+        description: txDescription.trim(),
+        date: effectiveDate,
+        notes: txNotes.trim() || undefined,
+      });
+
+      setTxDescription('');
+      setTxAmount('');
+      setTxPaidAmount('');
+      setTxInstallments(1);
+      setTxNotes('');
+      setIsNewModalOpen(false);
+      return;
+    }
 
     addTransaction({
       date: `${effectiveDate}T${effectiveTime}`,
@@ -719,25 +749,49 @@ export function MovimentacoesPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Conta Bancária
-                </label>
-                <select
-                  value={txAccountId}
-                  onChange={(e) => setTxAccountId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
-                >
-                  {accounts.length === 0 ? (
-                    <option value="">Nenhuma conta cadastrada</option>
-                  ) : (
-                    accounts.map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.institution} — {getPartnerName(partners, acc.partnerId)}
-                      </option>
-                    ))
-                  )}
-                </select>
+              <div className={txType === 'transfer' ? 'grid grid-cols-2 gap-3' : ''}>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    {txType === 'transfer' ? 'Conta de Origem' : 'Conta Bancária'}
+                  </label>
+                  <select
+                    value={txAccountId}
+                    onChange={(e) => setTxAccountId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+                  >
+                    {accounts.length === 0 ? (
+                      <option value="">Nenhuma conta cadastrada</option>
+                    ) : (
+                      accounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.institution} ({acc.accountName}) — {getPartnerName(partners, acc.partnerId)}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                {txType === 'transfer' && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Conta de Destino
+                    </label>
+                    <select
+                      value={txDestinationAccountId}
+                      onChange={(e) => setTxDestinationAccountId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
+                    >
+                      {accounts.length === 0 ? (
+                        <option value="">Nenhuma conta cadastrada</option>
+                      ) : (
+                        accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id} disabled={acc.id === txAccountId}>
+                            {acc.institution} ({acc.accountName}) — {getPartnerName(partners, acc.partnerId)}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

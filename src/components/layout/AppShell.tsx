@@ -237,6 +237,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!isAuthenticated && (
+              <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
+                Modo Demonstração (Simulado)
+              </span>
+            )}
             <button
               type="button"
               onClick={toggleTheme}

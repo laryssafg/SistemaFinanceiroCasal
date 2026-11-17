@@ -1,5 +1,9 @@
 import { supabase } from '../lib/supabaseClient';
+import type { Database } from '../types/supabase';
 import type { BankAccount, PartnerId, Transaction, TransactionStatus, TransactionType, PaymentMethod, ExpenseScope } from '../types/finance';
+
+type BankAccountUpdate = Database['public']['Tables']['bank_accounts']['Update'];
+type TransactionUpdate = Database['public']['Tables']['transactions']['Update'];
 
 /**
  * Converte valor em reais (float) para centavos inteiros (BIGINT)
@@ -164,7 +168,7 @@ export const accountService = {
    * Atualiza dados permitidos de uma conta bancária
    */
   async updateAccount(accountId: string, dto: UpdateAccountDTO): Promise<void> {
-    const payload: Record<string, any> = {};
+    const payload: BankAccountUpdate = {};
     if (dto.institution !== undefined) payload.institution = dto.institution.trim();
     if (dto.accountName !== undefined) payload.account_name = dto.accountName.trim();
     if (dto.accountType !== undefined) payload.account_type = dto.accountType;
@@ -288,7 +292,7 @@ export const transactionService = {
    * Atualiza dados de uma movimentação existente
    */
   async updateTransaction(id: string, dto: UpdateTransactionDTO): Promise<void> {
-    const payload: Record<string, any> = {};
+    const payload: TransactionUpdate = {};
     if (dto.description !== undefined) payload.description = dto.description.trim();
     if (dto.category !== undefined) payload.category = dto.category.trim();
     if (dto.status !== undefined) payload.status = dto.status;
@@ -341,7 +345,7 @@ export const transactionService = {
       p_amount: amountCents,
       p_description: params.description || 'Transferência entre contas',
       p_date: params.date || new Date().toISOString().split('T')[0],
-      p_notes: params.notes || null,
+      p_notes: params.notes,
     });
 
     if (error) {

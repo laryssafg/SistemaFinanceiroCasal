@@ -12,7 +12,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../types/database';
+import type { Database } from '../types/supabase';
 
 const DEFAULT_LOCAL_URL = 'http://127.0.0.1:54321';
 const DEFAULT_LOCAL_ANON_KEY =
@@ -31,7 +31,7 @@ export const isSupabaseConfigured = Boolean(
 const activeUrl = isSupabaseConfigured ? envUrl : DEFAULT_LOCAL_URL;
 const activeKey = isSupabaseConfigured ? envAnonKey : DEFAULT_LOCAL_ANON_KEY;
 
-export const supabase: SupabaseClient = createClient(
+export const supabase: SupabaseClient<Database> = createClient<Database>(
   activeUrl,
   activeKey,
   {
