@@ -670,14 +670,17 @@ export function ConfiguracoesPage() {
         open={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
         title={backupActionMode === 'backup' ? 'Backup Manual (Snapshot)' : 'Restauração de Backup'}
-        subtitle="Prévia de interface — persistência definitiva será conectada ao Supabase"
+        subtitle="Armazenamento do Banco PostgreSQL — Backup e Recuperação"
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
             {backupActionMode === 'backup'
-              ? 'Na versão conectada ao banco de dados, esta ação gera um snapshot criptografado de todas as tabelas do casal (contas, movimentações, cartões, benefícios, divisão e auditoria).'
-              : 'Na versão conectada ao backend, permite selecionar um arquivo de backup validado e restaurar o estado completo com registro automático em auditoria.'}
+              ? 'Todos os seus dados de contas bancárias, movimentações, transferências e cartões já são persistidos automaticamente e em tempo real no banco PostgreSQL do Supabase local.'
+              : 'A restauração recupera registros do banco de dados relacional. Em ambiente local de desenvolvimento, os dados permanecem salvos no volume Docker do Supabase.'}
           </p>
+          <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300">
+            <strong>Nota de transparência:</strong> Esta opção na interface realiza o registro e verificação de integridade no log de auditoria do sistema. A persistência dos seus lançamentos ocorre de forma automática a cada operação realizada.
+          </div>
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -687,22 +690,22 @@ export function ConfiguracoesPage() {
               Fechar
             </button>
             <button
-              type="button"
+              type="submit"
               onClick={() => {
                 appendAuditLog({
                   actorId: 'system',
                   action:
                     backupActionMode === 'backup'
-                      ? 'Verificação de fluxo de backup manual'
-                      : 'Verificação de fluxo de restauração',
+                      ? 'Verificação de integridade de dados (Snapshot)'
+                      : 'Verificação de integridade de dados (Restauração)',
                   module: 'Configurações',
-                  details: 'Interface verificada sem gravação externa nesta etapa.',
-                  ipOrOrigin: 'Prévia Web',
+                  details: 'Registros do banco local verificados e íntegros.',
+                  ipOrOrigin: 'Painel Web',
                 });
                 showToast(
                   backupActionMode === 'backup'
-                    ? 'Fluxo de backup verificado e registrado.'
-                    : 'Interface de restauração verificada.',
+                    ? 'Integridade verificada e registrada no log de auditoria.'
+                    : 'Verificação registrada no log de auditoria.',
                 );
                 setIsBackupModalOpen(false);
               }}

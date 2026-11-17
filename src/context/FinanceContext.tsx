@@ -206,10 +206,54 @@ function getNowDateTimeIso(): string {
   )}:${pad(now.getMinutes())}`;
 }
 
+const ACTIVE_PAGE_STORAGE_KEY = 'sfc_active_page_v1';
+
+function getInitialActivePage(): NavSectionId {
+  if (typeof window === 'undefined') return 'dashboard';
+  try {
+    const saved = window.sessionStorage.getItem(ACTIVE_PAGE_STORAGE_KEY) as NavSectionId | null;
+    const validSections: NavSectionId[] = [
+      'dashboard',
+      'movimentacoes',
+      'contas',
+      'cartoes',
+      'beneficios',
+      'orcamento',
+      'divisao',
+      'acertos',
+      'reserva',
+      'investimentos',
+      'metas',
+      'dividas',
+      'relatorios',
+      'alertas',
+      'auditoria',
+      'configuracoes',
+    ];
+    if (saved && validSections.includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // fallback seguro
+  }
+  return 'dashboard';
+}
+
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, household, memberProfile, partnerProfile } = useAuth();
   const [initialConfig] = useState<StoredPreviewConfig>(() => loadStoredConfig());
-  const [activePage, setActivePage] = useState<NavSectionId>('dashboard');
+  const [activePage, setActivePageState] = useState<NavSectionId>(() => getInitialActivePage());
+
+  const setActivePage = useCallback((page: NavSectionId) => {
+    setActivePageState(page);
+    try {
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, page);
+      }
+    } catch {
+      // ignora restrições do storage
+    }
+  }, []);
   const [theme, setTheme] = useState<ThemeMode>(initialConfig.theme ?? 'light');
   const partnersFromAuth = useMemo<PartnerProfile[]>(() => {
     if (!isAuthenticated || !household?.id) {

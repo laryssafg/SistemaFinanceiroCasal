@@ -238,9 +238,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-2 shrink-0">
             {!isAuthenticated && (
-              <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
-                Modo Demonstração (Simulado)
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthModalMode('login');
+                  setIsAuthModalOpen(true);
+                }}
+                title="Você está visualizando dados fictícios em memória. Clique para entrar ou criar sua conta segura no banco de dados."
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 dark:bg-amber-950/70 dark:hover:bg-amber-900/60 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60 transition-colors cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span>Modo Demonstração (Simulado) — Entrar</span>
+              </button>
             )}
             <button
               type="button"
