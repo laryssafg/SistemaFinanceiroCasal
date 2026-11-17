@@ -21,6 +21,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { getCurrentReferenceMonthLabel } from '../../data/mockData';
 import { NavSectionId } from '../../types/finance';
@@ -73,6 +74,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     toastMessage,
     setIsAuthDemoOpen,
   } = useFinance();
+
+  const {
+    isAuthenticated,
+    user,
+    household,
+    memberProfile,
+    partnerProfile,
+    setIsAuthModalOpen,
+    setAuthModalMode,
+  } = useAuth();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const currentMonthLabel = getCurrentReferenceMonthLabel();
@@ -163,32 +174,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
           <button
             type="button"
-            onClick={() => setIsAuthDemoOpen(true)}
+            onClick={() => setIsAuthModalOpen(true)}
             className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left"
           >
             <div className="flex -space-x-2 shrink-0">
               <PartnerAvatar
                 src={partners.find((p) => p.id === 'partner_a')?.photoDataUrl}
-                name={partners.find((p) => p.id === 'partner_a')?.name}
+                name={memberProfile?.short_name || partners.find((p) => p.id === 'partner_a')?.name}
                 size="sm"
               />
               <PartnerAvatar
                 src={partners.find((p) => p.id === 'partner_b')?.photoDataUrl}
-                name={partners.find((p) => p.id === 'partner_b')?.name}
+                name={partnerProfile?.short_name || partners.find((p) => p.id === 'partner_b')?.name}
                 size="sm"
               />
             </div>
             <div className="min-w-0">
               <p className="text-xs font-medium text-navy-950 dark:text-slate-100 truncate">
-                {partners.some((p) => p.name.trim())
-                  ? partners
-                      .filter((p) => p.name.trim())
-                      .map((p) => p.shortName)
-                      .join(' & ')
-                  : 'Perfis não configurados'}
+                {isAuthenticated
+                  ? (household?.display_name || 'Nosso Casal')
+                  : (partners.some((p) => p.name.trim())
+                      ? partners
+                          .filter((p) => p.name.trim())
+                          .map((p) => p.shortName)
+                          .join(' & ')
+                      : 'Acesso ao Sistema')}
               </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                Prévia de desenvolvimento
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1.5">
+                {isAuthenticated ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="truncate">
+                      {memberProfile?.short_name || user?.email?.split('@')[0]}
+                    </span>
+                  </>
+                ) : (
+                  'Entrar / Cadastrar'
+                )}
               </p>
             </div>
           </button>
@@ -234,6 +256,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               Configurações
             </button>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-navy-950 dark:text-slate-100 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                <span className="max-w-[110px] truncate">
+                  {memberProfile?.short_name || user?.email?.split('@')[0]}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthModalMode('login');
+                  setIsAuthModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              >
+                Entrar
+              </button>
+            )}
           </div>
         </header>
 

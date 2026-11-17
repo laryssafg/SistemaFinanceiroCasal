@@ -1,6 +1,7 @@
 import React from 'react';
-import { AuthDemoModal } from './components/auth/AuthDemoModal';
+import { AuthModal } from './components/auth/AuthModal';
 import { AppShell } from './components/layout/AppShell';
+import { AuthProvider } from './context/AuthContext';
 import { FinanceProvider, useFinance } from './context/FinanceContext';
 import { AcertosPage } from './pages/AcertosPage';
 import { AlertasPage } from './pages/AlertasPage';
@@ -62,11 +63,13 @@ function PageRouter() {
 
 export default function App() {
   return (
-    <FinanceProvider>
-      <AppShell>
-        <PageRouter />
-      </AppShell>
-      <AuthDemoModal />
-    </FinanceProvider>
+    <AuthProvider>
+      <FinanceProvider>
+        <AppShell>
+          <PageRouter />
+        </AppShell>
+        <AuthModal />
+      </FinanceProvider>
+    </AuthProvider>
   );
 }

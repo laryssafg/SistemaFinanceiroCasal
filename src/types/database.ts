@@ -114,6 +114,20 @@ export interface HouseholdMemberRow {
   updated_at: ISOTimestamp;
 }
 
+export interface HouseholdInviteRow {
+  id: UUID;
+  household_id: UUID;
+  invited_by: UUID;
+  invited_email: string;
+  token_hash: string;
+  partner_role: PartnerRole;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expires_at: ISOTimestamp;
+  accepted_at: ISOTimestamp | null;
+  accepted_by: UUID | null;
+  created_at: ISOTimestamp;
+}
+
 export interface HouseholdSettingsRow {
   id: UUID;
   household_id: UUID;
@@ -598,185 +612,245 @@ export interface Database {
         Row: HouseholdRow;
         Insert: Partial<HouseholdRow> & Pick<HouseholdRow, 'display_name'>;
         Update: Partial<HouseholdRow>;
+        Relationships: [];
       };
       household_members: {
         Row: HouseholdMemberRow;
         Insert: Partial<HouseholdMemberRow> & Pick<HouseholdMemberRow, 'household_id' | 'partner_role'>;
         Update: Partial<HouseholdMemberRow>;
+        Relationships: [];
+      };
+      household_invites: {
+        Row: HouseholdInviteRow;
+        Insert: Partial<HouseholdInviteRow> & Pick<HouseholdInviteRow, 'household_id' | 'invited_by' | 'invited_email' | 'token_hash'>;
+        Update: Partial<HouseholdInviteRow>;
+        Relationships: [];
       };
       household_settings: {
         Row: HouseholdSettingsRow;
         Insert: Partial<HouseholdSettingsRow> & Pick<HouseholdSettingsRow, 'household_id'>;
         Update: Partial<HouseholdSettingsRow>;
+        Relationships: [];
       };
       bank_accounts: {
         Row: BankAccountRow;
         Insert: Partial<BankAccountRow> & Pick<BankAccountRow, 'household_id' | 'member_id' | 'institution' | 'account_name' | 'account_type'>;
         Update: Partial<BankAccountRow>;
+        Relationships: [];
       };
       transactions: {
         Row: TransactionRow;
         Insert: Partial<TransactionRow> & Pick<TransactionRow, 'household_id' | 'member_id' | 'transaction_type' | 'amount' | 'competence_month'>;
         Update: Partial<TransactionRow>;
+        Relationships: [];
       };
       benefit_cards: {
         Row: BenefitCardRow;
         Insert: Partial<BenefitCardRow> & Pick<BenefitCardRow, 'household_id' | 'member_id' | 'benefit_type' | 'provider_name'>;
         Update: Partial<BenefitCardRow>;
+        Relationships: [];
       };
       benefit_movements: {
         Row: BenefitMovementRow;
         Insert: Partial<BenefitMovementRow> & Pick<BenefitMovementRow, 'household_id' | 'benefit_card_id' | 'movement_type' | 'amount' | 'competence_month'>;
         Update: Partial<BenefitMovementRow>;
+        Relationships: [];
       };
       credit_cards: {
         Row: CreditCardRow;
         Insert: Partial<CreditCardRow> & Pick<CreditCardRow, 'household_id' | 'owner_id' | 'card_name' | 'bank' | 'brand' | 'closing_day' | 'due_day' | 'last_four_digits'>;
         Update: Partial<CreditCardRow>;
+        Relationships: [];
       };
       credit_card_invoices: {
         Row: CreditCardInvoiceRow;
         Insert: Partial<CreditCardInvoiceRow> & Pick<CreditCardInvoiceRow, 'household_id' | 'card_id' | 'reference_month'>;
         Update: Partial<CreditCardInvoiceRow>;
+        Relationships: [];
       };
       credit_card_purchases: {
         Row: CreditCardPurchaseRow;
         Insert: Partial<CreditCardPurchaseRow> & Pick<CreditCardPurchaseRow, 'household_id' | 'card_id' | 'buyer_id' | 'description' | 'total_amount'>;
         Update: Partial<CreditCardPurchaseRow>;
+        Relationships: [];
       };
       credit_card_installments: {
         Row: CreditCardInstallmentRow;
         Insert: Partial<CreditCardInstallmentRow> & Pick<CreditCardInstallmentRow, 'household_id' | 'purchase_id' | 'installment_number' | 'installment_amount' | 'due_month'>;
         Update: Partial<CreditCardInstallmentRow>;
+        Relationships: [];
       };
       invoice_payments: {
         Row: InvoicePaymentRow;
         Insert: Partial<InvoicePaymentRow> & Pick<InvoicePaymentRow, 'household_id' | 'invoice_id' | 'account_id' | 'amount'>;
         Update: Partial<InvoicePaymentRow>;
+        Relationships: [];
       };
       proportional_periods: {
         Row: ProportionalPeriodRow;
         Insert: Partial<ProportionalPeriodRow> & Pick<ProportionalPeriodRow, 'household_id' | 'competence_month'>;
         Update: Partial<ProportionalPeriodRow>;
+        Relationships: [];
       };
       shared_responsibilities: {
         Row: SharedResponsibilityRow;
         Insert: Partial<SharedResponsibilityRow> & Pick<SharedResponsibilityRow, 'household_id' | 'period_id' | 'description' | 'total_amount' | 'paid_by_member_id' | 'partner_a_share' | 'partner_b_share' | 'applied_a_percent' | 'applied_b_percent'>;
         Update: Partial<SharedResponsibilityRow>;
+        Relationships: [];
       };
       couple_settlements: {
         Row: CoupleSettlementRow;
         Insert: Partial<CoupleSettlementRow> & Pick<CoupleSettlementRow, 'household_id' | 'reference_month' | 'from_member_id' | 'to_member_id' | 'amount'>;
         Update: Partial<CoupleSettlementRow>;
+        Relationships: [];
       };
       settlement_transfers: {
         Row: SettlementTransferRow;
         Insert: Partial<SettlementTransferRow> & Pick<SettlementTransferRow, 'household_id' | 'settlement_id' | 'transaction_id' | 'amount'>;
         Update: Partial<SettlementTransferRow>;
+        Relationships: [];
       };
       budget_categories: {
         Row: BudgetCategoryRow;
         Insert: Partial<BudgetCategoryRow> & Pick<BudgetCategoryRow, 'household_id' | 'category_name'>;
         Update: Partial<BudgetCategoryRow>;
+        Relationships: [];
       };
       monthly_budgets: {
         Row: MonthlyBudgetRow;
         Insert: Partial<MonthlyBudgetRow> & Pick<MonthlyBudgetRow, 'household_id' | 'competence_month'>;
         Update: Partial<MonthlyBudgetRow>;
+        Relationships: [];
       };
       budget_category_limits: {
         Row: BudgetCategoryLimitRow;
         Insert: Partial<BudgetCategoryLimitRow> & Pick<BudgetCategoryLimitRow, 'budget_id' | 'category_id'>;
         Update: Partial<BudgetCategoryLimitRow>;
+        Relationships: [];
       };
       recurrence_rules: {
         Row: RecurrenceRuleRow;
         Insert: Partial<RecurrenceRuleRow> & Pick<RecurrenceRuleRow, 'household_id' | 'member_id' | 'description' | 'transaction_type' | 'amount'>;
         Update: Partial<RecurrenceRuleRow>;
+        Relationships: [];
       };
       investment_assets: {
         Row: InvestmentAssetRow;
         Insert: Partial<InvestmentAssetRow> & Pick<InvestmentAssetRow, 'household_id' | 'asset_name' | 'institution' | 'asset_class'>;
         Update: Partial<InvestmentAssetRow>;
+        Relationships: [];
       };
       investment_movements: {
         Row: InvestmentMovementRow;
         Insert: Partial<InvestmentMovementRow> & Pick<InvestmentMovementRow, 'household_id' | 'asset_id' | 'movement_type' | 'amount'>;
         Update: Partial<InvestmentMovementRow>;
+        Relationships: [];
       };
       investment_valuations: {
         Row: InvestmentValuationRow;
         Insert: Partial<InvestmentValuationRow> & Pick<InvestmentValuationRow, 'asset_id' | 'balance'>;
         Update: Partial<InvestmentValuationRow>;
+        Relationships: [];
       };
       emergency_reserve_configs: {
         Row: EmergencyReserveConfigRow;
         Insert: Partial<EmergencyReserveConfigRow> & Pick<EmergencyReserveConfigRow, 'household_id'>;
         Update: Partial<EmergencyReserveConfigRow>;
+        Relationships: [];
       };
       emergency_reserve_movements: {
         Row: EmergencyReserveMovementRow;
         Insert: Partial<EmergencyReserveMovementRow> & Pick<EmergencyReserveMovementRow, 'household_id' | 'config_id' | 'member_id' | 'movement_type' | 'amount'>;
         Update: Partial<EmergencyReserveMovementRow>;
+        Relationships: [];
       };
       financial_goals: {
         Row: FinancialGoalRow;
         Insert: Partial<FinancialGoalRow> & Pick<FinancialGoalRow, 'household_id' | 'title' | 'target_amount'>;
         Update: Partial<FinancialGoalRow>;
+        Relationships: [];
       };
       goal_contributions: {
         Row: GoalContributionRow;
         Insert: Partial<GoalContributionRow> & Pick<GoalContributionRow, 'goal_id' | 'amount'>;
         Update: Partial<GoalContributionRow>;
+        Relationships: [];
       };
       debts: {
         Row: DebtRow;
         Insert: Partial<DebtRow> & Pick<DebtRow, 'household_id' | 'title' | 'creditor' | 'original_amount' | 'total_installments' | 'installment_value'>;
         Update: Partial<DebtRow>;
+        Relationships: [];
       };
       debt_installments: {
         Row: DebtInstallmentRow;
         Insert: Partial<DebtInstallmentRow> & Pick<DebtInstallmentRow, 'debt_id' | 'installment_number' | 'due_date' | 'total_amount'>;
         Update: Partial<DebtInstallmentRow>;
+        Relationships: [];
       };
       fiscal_periods: {
         Row: FiscalPeriodRow;
         Insert: Partial<FiscalPeriodRow> & Pick<FiscalPeriodRow, 'household_id' | 'competence_month'>;
         Update: Partial<FiscalPeriodRow>;
+        Relationships: [];
       };
       fiscal_snapshots: {
         Row: FiscalSnapshotRow;
         Insert: Partial<FiscalSnapshotRow> & Pick<FiscalSnapshotRow, 'period_id'>;
         Update: Partial<FiscalSnapshotRow>;
+        Relationships: [];
       };
       system_alerts: {
         Row: SystemAlertRow;
         Insert: Partial<SystemAlertRow> & Pick<SystemAlertRow, 'household_id' | 'title'>;
         Update: Partial<SystemAlertRow>;
+        Relationships: [];
       };
       audit_logs: {
         Row: AuditLogRow;
         Insert: Partial<AuditLogRow> & Pick<AuditLogRow, 'household_id' | 'action' | 'entity_type'>;
         Update: never; // Auditoria é append-only
+        Relationships: [];
       };
       monthly_series: {
         Row: MonthlySeriesRow;
         Insert: Partial<MonthlySeriesRow> & Pick<MonthlySeriesRow, 'household_id' | 'competence_month'>;
         Update: Partial<MonthlySeriesRow>;
+        Relationships: [];
       };
     };
     Views: {
       v_bank_account_balances: {
         Row: BankAccountRow & { total_credits: number; total_debits: number; current_balance: number };
+        Relationships: [];
       };
       v_benefit_card_balances: {
         Row: BenefitCardRow & { total_credits: number; total_purchases: number; current_balance: number };
+        Relationships: [];
       };
       v_investment_balances: {
         Row: InvestmentAssetRow & { current_balance: number; last_valuation_date: ISODate | null };
+        Relationships: [];
       };
     };
-    Functions: Record<string, never>;
+    Functions: {
+      create_household_with_creator: {
+        Args: {
+          p_display_name?: string;
+          p_member_name?: string;
+          p_short_name?: string;
+        };
+        Returns: string;
+      };
+      accept_household_invite: {
+        Args: {
+          p_token_hash: string;
+          p_display_name?: string;
+          p_short_name?: string;
+        };
+        Returns: string;
+      };
+    };
     Enums: Record<string, never>;
   };
 }
