@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import { useAuth } from './AuthContext';
+import { accountService, transactionService } from '../services/financeDataService';
 import {
   INITIAL_ALERTS,
   INITIAL_AUDIT_LOGS,
@@ -124,6 +126,9 @@ interface FinanceContextValue {
   ) => void;
   financialSettings: FinancialSettings;
   updateFinancialSettings: (next: FinancialSettings) => void;
+  isDataLoading: boolean;
+  refreshFinancialData: () => Promise<void>;
+  isLiveDatabase: boolean;
   accounts: BankAccount[];
   addBankAccount: (account: Omit<BankAccount, 'id' | 'lastUpdated'>) => void;
   transactions: Transaction[];
@@ -193,6 +198,7 @@ function getNowDateTimeIso(): string {
 }
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, household, memberProfile, partnerProfile } = useAuth();
   const [initialConfig] = useState<StoredPreviewConfig>(() => loadStoredConfig());
   const [activePage, setActivePage] = useState<NavSectionId>('dashboard');
   const [theme, setTheme] = useState<ThemeMode>(initialConfig.theme ?? 'light');
@@ -202,8 +208,61 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [financialSettings, setFinancialSettings] = useState<FinancialSettings>(
     initialConfig.financialSettings ?? DEFAULT_FINANCIAL_SETTINGS,
   );
+
+  // Estados de dados financeiros com controle de persistência vs mock
   const [accounts, setAccounts] = useState<BankAccount[]>(INITIAL_BANK_ACCOUNTS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [isDataLoading, setIsDataLoading] = useState<boolean>(false);
+
+  const isLiveDatabase = Boolean(isAuthenticated && household?.id);
+
+  // Mapeamento de member_id UUID <-> partner_role ('partner_a' | 'partner_b')
+  const householdMembersMap = useMemo(() => {
+    const map: Record<string, { partnerId: PartnerId; name: string }> = {};
+    if (memberProfile?.id) {
+      map[memberProfile.id] = {
+        partnerId: memberProfile.partner_role as PartnerId,
+        name: memberProfile.display_name || memberProfile.short_name,
+      };
+    }
+    if (partnerProfile?.id) {
+      map[partnerProfile.id] = {
+        partnerId: partnerProfile.partner_role as PartnerId,
+        name: partnerProfile.display_name || partnerProfile.short_name,
+      };
+    }
+    return map;
+  }, [memberProfile, partnerProfile]);
+
+  // Carregamento reativo a partir do Supabase quando logado em um núcleo
+  const refreshFinancialData = useCallback(async () => {
+    if (!isAuthenticated || !household?.id) {
+      // Modo não autenticado: dados de demonstração
+      setAccounts(INITIAL_BANK_ACCOUNTS);
+      setTransactions(INITIAL_TRANSACTIONS);
+      return;
+    }
+
+    try {
+      setIsDataLoading(true);
+      const [dbAccounts, dbTransactions] = await Promise.all([
+        accountService.listAccounts(householdMembersMap),
+        transactionService.listTransactions(householdMembersMap),
+      ]);
+      setAccounts(dbAccounts);
+      setTransactions(dbTransactions);
+    } catch (err: any) {
+      console.error('Falha ao carregar dados do Supabase:', err);
+      showToast('Erro ao sincronizar dados com o banco.');
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, [isAuthenticated, household?.id, householdMembersMap]);
+
+  // Recarrega sempre que a autenticação, o núcleo ou os membros mudarem
+  useEffect(() => {
+    refreshFinancialData();
+  }, [refreshFinancialData]);
   const [benefits, setBenefits] = useState<BenefitCard[]>(INITIAL_BENEFIT_CARDS);
   const [cards, setCards] = useState<CreditCard[]>(INITIAL_CREDIT_CARDS);
   const [installments, setInstallments] = useState<CreditCardInstallment[]>(
@@ -362,7 +421,41 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     showToast('Configurações financeiras salvas.');
   };
 
-  const addBankAccount = (account: Omit<BankAccount, 'id' | 'lastUpdated'>) => {
+  const addBankAccount = async (account: Omit<BankAccount, 'id' | 'lastUpdated'>) => {
+    if (isLiveDatabase && household?.id && memberProfile?.id) {
+      try {
+        setIsDataLoading(true);
+        // Descobre memberId do titular selecionado
+        let targetMemberId = memberProfile.id;
+        if (account.partnerId === partnerProfile?.partner_role && partnerProfile?.id) {
+          targetMemberId = partnerProfile.id;
+        }
+
+        await accountService.createAccount(
+          {
+            partnerId: account.partnerId,
+            institution: account.institution,
+            accountName: account.accountName,
+            accountType: account.accountType,
+            openingBalance: account.openingBalance,
+          },
+          household.id,
+          targetMemberId,
+        );
+
+        await refreshFinancialData();
+        showToast('Conta bancária cadastrada com sucesso!');
+        return;
+      } catch (err: any) {
+        console.error('Erro ao salvar conta no Supabase:', err);
+        showToast(`Erro: ${err.message || 'Falha ao salvar conta.'}`);
+        return;
+      } finally {
+        setIsDataLoading(false);
+      }
+    }
+
+    // Modo prévia/desconectado: mock em memória
     const newAcc: BankAccount = {
       ...account,
       id: `acc_${Date.now()}`,
@@ -379,7 +472,55 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     showToast('Conta bancária adicionada na prévia.');
   };
 
-  const addTransaction = (tx: Omit<Transaction, 'id'>) => {
+  const addTransaction = async (tx: Omit<Transaction, 'id'>) => {
+    if (isLiveDatabase && household?.id && memberProfile?.id) {
+      try {
+        setIsDataLoading(true);
+        // Descobre memberId do titular selecionado
+        let targetMemberId = memberProfile.id;
+        if (tx.partnerId === partnerProfile?.partner_role && partnerProfile?.id) {
+          targetMemberId = partnerProfile.id;
+        }
+
+        // Se for receita ou despesa padrão
+        if (tx.type === 'income' || tx.type === 'expense') {
+          await transactionService.createTransaction(
+            {
+              partnerId: tx.partnerId,
+              accountId: tx.accountId,
+              type: tx.type,
+              status: tx.status,
+              amount: tx.amount,
+              paidAmount: tx.paidAmount,
+              description: tx.description,
+              category: tx.category,
+              date: tx.date,
+              paymentMethod: tx.paymentMethod,
+              scope: tx.scope,
+              notes: tx.notes,
+            },
+            household.id,
+            targetMemberId,
+          );
+        }
+
+        await refreshFinancialData();
+        showToast(
+          tx.type === 'income'
+            ? 'Receita cadastrada com sucesso!'
+            : 'Despesa cadastrada com sucesso!',
+        );
+        return;
+      } catch (err: any) {
+        console.error('Erro ao salvar movimentação no Supabase:', err);
+        showToast(`Erro: ${err.message || 'Falha ao salvar movimentação.'}`);
+        return;
+      } finally {
+        setIsDataLoading(false);
+      }
+    }
+
+    // Modo prévia/desconectado: mock em memória
     const actorName =
       partners.find((p) => p.id === tx.partnerId)?.name ??
       (tx.partnerId === 'partner_a' ? 'Titular 1' : 'Titular 2');
@@ -821,6 +962,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     upsertPartnerProfile,
     financialSettings,
     updateFinancialSettings,
+    isDataLoading,
+    refreshFinancialData,
+    isLiveDatabase,
     accounts,
     addBankAccount,
     transactions,

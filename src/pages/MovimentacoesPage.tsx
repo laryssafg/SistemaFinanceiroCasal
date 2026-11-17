@@ -43,6 +43,7 @@ export function MovimentacoesPage() {
     benefits,
     partners,
     setActivePage,
+    isDataLoading,
   } = useFinance();
 
   const [tab, setTab] = useState<'all' | 'recurring' | 'pending'>('all');
@@ -790,10 +791,10 @@ export function MovimentacoesPage() {
             </button>
             <button
               type="submit"
-              disabled={txMethod === 'credit_card' && (!txCardId || cards.length === 0)}
+              disabled={isDataLoading || (txMethod === 'credit_card' && (!txCardId || cards.length === 0))}
               className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 disabled:opacity-40 disabled:cursor-not-allowed dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
             >
-              Salvar Lançamento
+              {isDataLoading ? 'Salvando...' : 'Salvar Lançamento'}
             </button>
           </div>
         </form>

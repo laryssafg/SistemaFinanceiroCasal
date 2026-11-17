@@ -13,7 +13,7 @@ import { PartnerId } from '../types/finance';
 import { formatBRL, formatDateBR, formatDateTimeBR } from '../utils/formatters';
 
 export function ContasPage() {
-  const { accounts, addBankAccount, partners, summary, transactions } = useFinance();
+  const { accounts, addBankAccount, partners, summary, transactions, isDataLoading } = useFinance();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
@@ -344,9 +344,10 @@ export function ContasPage() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg"
+              disabled={isDataLoading}
+              className="px-4 py-2 text-xs font-medium text-white bg-navy-900 hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Salvar Conta
+              {isDataLoading ? 'Salvando...' : 'Salvar Conta'}
             </button>
           </div>
         </form>
